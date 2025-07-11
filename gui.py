@@ -9,8 +9,8 @@ from PyQt5 import QtCore
 from multiprocessing import Process, Pipe
 from threading import Thread
 
-from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox,QDialog, QGridLayout,QHBoxLayout, QLabel,
-                             QProgressBar, QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget)
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox,QDialog, QGridLayout,QHBoxLayout, QLabel, QCheckBox, QSpacerItem,
+                             QProgressBar, QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem)
 
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage
@@ -20,8 +20,8 @@ class PyMarAiGuiApp(QDialog):
 
     microscopes = ["-", "1: microscope with 0.2012 pixel per micrometer", "2: microscope with 0.3534 pixel per micrometer",
                    "3: microscope with 1.079 pixel per micrometer", "4: microscope with 1.449 pixel per micrometer"]
-
     defaultMicroscopeType = "-"
+    gpu = ["saturn", "vega", "lyra", "fwpvm42", "fwpvm43"]
 
     # we use constructor to create the GUI layout
     def __init__(self, parent=None):
@@ -39,6 +39,7 @@ class PyMarAiGuiApp(QDialog):
         self.predictionThread = None
         self.loadDataThread = None
         self.processingRunning = False
+        self.outputBasenames = set()
 
         # creates GUI components
         inputFileLabel = self.createLabel("Input folder:")
@@ -51,6 +52,7 @@ class PyMarAiGuiApp(QDialog):
         self.inputFileListWidget.setFixedHeight(375)
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.MultiSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
 
         self.imagePreviewLabel = self.createLabel("Image Preview")
         self.imagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -105,6 +107,21 @@ class PyMarAiGuiApp(QDialog):
         microscopeLayout.setSpacing(23)
         microscopeLayout.addWidget(self.microscopeComboBox)
 
+        self.deviceLabel = self.createLabel("Device:")
+        self.deviceLabel.setStyleSheet("color: #333; font-weight: bold;")
+        self.useGpuCheckBox = QCheckBox("Use GPU")
+        self.spacer = QSpacerItem(47, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
+        self.useGpuCheckBox.stateChanged.connect(self.toggleDeviceList)
+        self.deviceComboBox = QComboBox()
+        self.deviceComboBox.addItems(self.gpu)
+
+        gpuLayout = QHBoxLayout()
+        gpuLayout.addWidget(self.deviceLabel)
+        gpuLayout.addItem(self.spacer)
+        gpuLayout.addWidget(self.useGpuCheckBox)
+        gpuLayout.addWidget(self.deviceComboBox)
+        gpuLayout.addStretch()
+
         predictionButtonLayout = QHBoxLayout()
         self.predictionButton = self.createButton("Run Prediction", self.predictionButtonPressed)
         predictionButtonLayout.addWidget(self.predictionButton)
@@ -158,6 +175,9 @@ class PyMarAiGuiApp(QDialog):
         mainLayout.addLayout(microscopeLayout, row, 0)
 
         row += 1
+        mainLayout.addLayout(gpuLayout, row, 0)
+
+        row += 1
         mainLayout.addLayout(predictionButtonLayout, row, 0, 1, 4)
 
         row += 1
@@ -197,6 +217,7 @@ class PyMarAiGuiApp(QDialog):
         self.deselectAllButton.setEnabled(enable)
         self.prevButton.setEnabled(enable)
         self.nextButton.setEnabled(enable)
+        self.deviceComboBox.setEnabled(False)
 
     # function to create GUI elements
     def createButton(self, text, member):
@@ -230,6 +251,42 @@ class PyMarAiGuiApp(QDialog):
             self.outputFilePathTextEdit.insert(dir)
             self.settings.setValue("lastOutputDir", dir)
 
+            self.updateOutputBasenames()
+
+            if self.inputFileListWidget.count() > 0:
+                self.markAnalyzedFiles()
+
+    def updateOutputBasenames(self):
+        self.outputBasenames = set()
+        output_dir = self.outputFilePathTextEdit.text().strip()
+        if os.path.isdir(output_dir):
+            self.outputBasenames = {
+                os.path.splitext(f)[0]
+                for f in os.listdir(output_dir)
+                if os.path.isfile(os.path.join(output_dir, f))
+            }
+
+    def markAnalyzedFiles(self):
+        output_dir = self.outputFilePathTextEdit.text().strip()
+
+        for i in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(i)
+            original_text = item.text().split(" [")[0].strip()
+            base = os.path.splitext(original_text)[0]
+
+            v_path = os.path.join(output_dir, base + ".v")
+            rdf_path = os.path.join(output_dir, base + ".rdf")
+
+            if os.path.exists(v_path) and os.path.exists(rdf_path):
+                item.setText(original_text + " [✓]")
+                item.setForeground(Qt.darkGreen)
+            else:
+                item.setText(original_text)
+                item.setForeground(Qt.black)
+
+    def cleanFilename(self, text):
+        return text.split(" [")[0].strip()
+
     def loadInputDirectory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Input Folder")
         if dir_path:
@@ -244,6 +301,8 @@ class PyMarAiGuiApp(QDialog):
 
         self.processingRunning = True
 
+        self.updateOutputBasenames()
+
         self.fileLoader = FileLoaderWorker(dir_path)
         self.fileLoader.filesLoaded.connect(self.onFilesLoaded)
         self.fileLoader.errorOccurred.connect(self.onFileLoadError)
@@ -255,8 +314,13 @@ class PyMarAiGuiApp(QDialog):
     def onFilesLoaded(self, file_list, dir_path):
         self.selectedInputDirectory = dir_path
         self.inputFileListWidget.clear()
-        self.inputFileListWidget.addItems(file_list)
         self.inputFileListWidget.clearSelection()
+
+        for file in file_list:
+            item = QListWidgetItem(file)
+            self.inputFileListWidget.addItem(item)
+
+        self.markAnalyzedFiles()  # mark the list visually
 
         if file_list:
             self.previewList = []
@@ -281,7 +345,7 @@ class PyMarAiGuiApp(QDialog):
         items = self.inputFileListWidget.selectedItems()
 
         if items:
-            self.previewList = [item.text() for item in items]
+            self.previewList = [self.cleanFilename(item.text()) for item in items]
             self.previewIndex = 0
             self.showImageAtIndex(self.previewIndex)
         else:
@@ -365,8 +429,14 @@ class PyMarAiGuiApp(QDialog):
             self.progressBar.show()
             self.progressBarLabel.show()
 
+    def toggleDeviceList(self):
+        if self.useGpuCheckBox.isChecked():
+            self.deviceComboBox.setEnabled(True)
+        else:
+            self.deviceComboBox.setEnabled(False)
+
     # switching between two states of elements
-    # for prediction and user interaction mode (for future use !!! )
+    # for prediction and user interaction mode
 
     def switchElementsToPrediction(self, isPrediction):
         if isPrediction:
@@ -374,6 +444,56 @@ class PyMarAiGuiApp(QDialog):
             self.predictionButton.setEnabled(True)
         else:
             self.predictionButton.setText("Run Prediction")
+
+    def openAnalyzedFile(self, item):
+        text = item.text()
+        if "[✓]" not in text:
+            self.progressPlainTextEdit.appendPlainText(f"'{text}' is not marked as analyzed. Skipping open with ROVER.")
+            return
+
+        filename = self.cleanFilename(text)
+        base = os.path.splitext(filename)[0]
+
+        output_dir = self.outputFilePathTextEdit.text().strip()
+        if not os.path.isdir(output_dir):
+            self.progressPlainTextEdit.appendPlainText("Output directory is not valid.")
+            return
+
+        # Find all .v files matching the base filename in output_dir
+        vFiles = [
+            os.path.join(output_dir, f)
+            for f in os.listdir(output_dir)
+            if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.v')
+        ]
+
+        # Find all .rdf files matching the base filename in output_dir
+        rdfFiles = [
+            os.path.join(output_dir, f)
+            for f in os.listdir(output_dir)
+            if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.rdf')
+        ]
+
+        if not vFiles:
+            self.progressPlainTextEdit.appendPlainText(f"No .v file found for '{filename}'.")
+            return
+
+        if not rdfFiles:
+            self.progressPlainTextEdit.appendPlainText(f"No .rdf file found for '{filename}'.")
+            return
+
+        # Show which files you will open
+        self.progressPlainTextEdit.appendPlainText(
+            f"Opening ROVER for '{filename}':\n"
+            + "\n".join(vFiles + rdfFiles)
+        )
+
+        # Open each .v file with rover, with -R 1 option
+        for vFile in vFiles:
+            try:
+                # Correct way to pass command + arguments:
+                subprocess.Popen(["rover", "-R", "1", vFile])
+            except Exception as e:
+                self.progressPlainTextEdit.appendPlainText(f"Failed to open {vFile}: {e}")
 
     #############################################
     # handle the event of Run Prediction button pressing
@@ -420,7 +540,10 @@ class PyMarAiGuiApp(QDialog):
             self.progressPlainTextEdit.appendPlainText("No input files selected.")
             return None
 
-        input_files = [os.path.join(self.selectedInputDirectory, item.text()) for item in selected_items]
+        input_files = [
+            os.path.join(self.selectedInputDirectory, self.cleanFilename(item.text()))
+            for item in selected_items
+        ]
 
         # output directory
         output_dir = self.outputFilePathTextEdit.text().strip()
@@ -436,6 +559,13 @@ class PyMarAiGuiApp(QDialog):
 
         microscope_code = self.microscopes[microscope_index].split(":")[0].strip()
 
+        use_gpu = self.useGpuCheckBox.isChecked()
+        selected_device = self.deviceComboBox.currentText()
+
+        if not use_gpu:
+            selected_device = "cpu"
+            #self.progressPlainTextEdit.appendPlainText("Running on CPU.")
+
         # Form the args list
         args = []
 
@@ -449,10 +579,14 @@ class PyMarAiGuiApp(QDialog):
         args.append("--microscope")
         args.append(microscope_code)
 
+        args.append("--device")
+        args.append(selected_device)
+
         self.progressPlainTextEdit.appendPlainText(f"Running prediction with:\n"
                                                    f"Input files: {input_files}\n"
                                                    f"Output dir: {output_dir}\n"
-                                                   f"Microscope: {microscope_code}\n")
+                                                   f"Microscope: {microscope_code}\n"
+                                                   f"Device: {selected_device}\n")
 
         return (predict.main, args)
 
@@ -477,6 +611,8 @@ class PyMarAiGuiApp(QDialog):
         self.enableWidgets(True)
         self.progressBar.hide()
         self.progressBarLabel.hide()
+        self.updateOutputBasenames()
+        self.markAnalyzedFiles()
 
 class PyMarAiThread(QtCore.QThread):
 
