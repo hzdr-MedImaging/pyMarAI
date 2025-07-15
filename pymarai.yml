@@ -1,0 +1,38 @@
+microscopes:
+  - "-"
+  - "1: microscope with 0.2012 pixel per micrometer"
+  - "2: microscope with 0.3534 pixel per micrometer"
+  - "3: microscope with 1.079 pixel per micrometer"
+  - "4: microscope with 1.449 pixel per micrometer"
+
+default_microscope: "-"
+
+utils:
+  mic2ecat: "/opt/spheroids-dnn/bin/mic2ecat"
+  roi2Rdf: "/opt/spheroids-dnn/bin/roi2rdf"
+  nnunet_predict: "/opt/conda/envs/nnunet/bin/nnUNetv2_predict"
+
+nnunet:
+  env: "nnunet-spheroids"
+  dataset: "Dataset001_spheroids_V1"
+  trainer: "nnUNetTrainer_noSmooth"
+  config: "2d"
+  plans: "nnUNetPlans"
+  folds: [0, 1, 2, 3, 4]
+
+machines:
+  - saturn:
+      - 149.220.74.18
+      - { default: true }
+      - cpu: true
+      - gpu: false
+  - vega:
+      - 149.220.74.70
+      - cpu: false
+      - gpu: true
+  - lyra:
+      - 149.220.74.204
+      - cpu: false
+      - gpu: true
+
+
