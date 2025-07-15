@@ -3,13 +3,18 @@ import os
 import platform
 import subprocess
 import multiprocessing
+
+import login
 import predict
 
 from PyQt5 import QtCore
 from multiprocessing import Process, Pipe
 from threading import Thread
 
-from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox,QDialog, QGridLayout,QHBoxLayout, QLabel, QCheckBox, QSpacerItem,
+from config import AppConfig
+from marai import MarAiRemote, MarAiLocal
+
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QCheckBox, QSpacerItem,
                              QProgressBar, QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem)
 
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal
@@ -18,14 +23,14 @@ from PIL import Image, ImageOps
 
 class PyMarAiGuiApp(QDialog):
 
-    microscopes = ["-", "1: microscope with 0.2012 pixel per micrometer", "2: microscope with 0.3534 pixel per micrometer",
-                   "3: microscope with 1.079 pixel per micrometer", "4: microscope with 1.449 pixel per micrometer"]
-    defaultMicroscopeType = "-"
-    gpu = ["saturn", "vega", "lyra", "fwpvm42", "fwpvm43"]
-
     # we use constructor to create the GUI layout
-    def __init__(self, parent=None):
+    def __init__(self, config: AppConfig, parent=None):
         super(PyMarAiGuiApp, self).__init__(parent)
+
+        self.config = config
+
+        self.microscopes = config.get_microscopes()
+        self.defaultMicroscopeType = config.get_default_microscope()
 
         # load persistent settings
         self.settings = QSettings("PyMarAi", "PyMarAiGuiApp")
@@ -100,27 +105,11 @@ class PyMarAiGuiApp(QDialog):
         index = self.microscopeComboBox.findText(self.defaultMicroscopeType)
         if index != -1:
             self.microscopeComboBox.setCurrentIndex(index)
-        self.microscopeComboBox.setCurrentIndex(index)
 
         microscopeLayout = QHBoxLayout()
         microscopeLayout.addWidget(self.microscopeLabel)
         microscopeLayout.setSpacing(23)
         microscopeLayout.addWidget(self.microscopeComboBox)
-
-        self.deviceLabel = self.createLabel("Device:")
-        self.deviceLabel.setStyleSheet("color: #333; font-weight: bold;")
-        self.useGpuCheckBox = QCheckBox("Use GPU")
-        self.spacer = QSpacerItem(47, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
-        self.useGpuCheckBox.stateChanged.connect(self.toggleDeviceList)
-        self.deviceComboBox = QComboBox()
-        self.deviceComboBox.addItems(self.gpu)
-
-        gpuLayout = QHBoxLayout()
-        gpuLayout.addWidget(self.deviceLabel)
-        gpuLayout.addItem(self.spacer)
-        gpuLayout.addWidget(self.useGpuCheckBox)
-        gpuLayout.addWidget(self.deviceComboBox)
-        gpuLayout.addStretch()
 
         predictionButtonLayout = QHBoxLayout()
         self.predictionButton = self.createButton("Run Prediction", self.predictionButtonPressed)
@@ -175,9 +164,6 @@ class PyMarAiGuiApp(QDialog):
         mainLayout.addLayout(microscopeLayout, row, 0)
 
         row += 1
-        mainLayout.addLayout(gpuLayout, row, 0)
-
-        row += 1
         mainLayout.addLayout(predictionButtonLayout, row, 0, 1, 4)
 
         row += 1
@@ -217,7 +203,6 @@ class PyMarAiGuiApp(QDialog):
         self.deselectAllButton.setEnabled(enable)
         self.prevButton.setEnabled(enable)
         self.nextButton.setEnabled(enable)
-        self.deviceComboBox.setEnabled(False)
 
     # function to create GUI elements
     def createButton(self, text, member):
@@ -500,25 +485,43 @@ class PyMarAiGuiApp(QDialog):
 
     def predictionButtonPressed(self):
         if not self.processingRunning:
-            # clear the progress output and prepare for job processing
-            self.progressPlainTextEdit.clear()
-            self.processJobs = []
 
-            # build the prediction job
-            prediction_result = self.prediction()
-            if prediction_result is None:
-                return
+            # show login dialog for SSH credentials
+            login_dialog = login.LoginDialog(self)
+            if login_dialog.exec_() == QDialog.Accepted:
+                username, password = login_dialog.get_credentials()
 
-            target, args = prediction_result
-            self.processJobs.append({'app': 'prediction', 'target': target, 'args': args})
+                if not username or not password:
+                    self.progressPlainTextEdit.appendPlainText("Username or password cannot be empty.")
+                    return
 
-            # Create and start the prediction thread
-            self.predictionThread = PyMarAiThread(self, self.processJobs)
-            self.predictionThread.started.connect(self.processingStarted)
-            self.predictionThread.finished.connect(self.processingFinished)
+                # save credentials in instance variable or pass them forward
+                self.ssh_username = username
+                self.ssh_password = password
 
-            self.predictionThread.start()
-            self.switchElementsToPrediction(True)
+                # clear the progress output and prepare for job processing
+                self.progressPlainTextEdit.clear()
+                self.processJobs = []
+
+                # build the prediction job
+                prediction_result = self.prediction()
+                if prediction_result is None:
+                    return
+
+                target, args = prediction_result
+                self.processJobs.append({'app': 'prediction', 'target': target, 'args': args})
+
+                # Create and start the prediction thread
+                self.predictionThread = PyMarAiThread(self, self.processJobs)
+                self.predictionThread.started.connect(self.processingStarted)
+                self.predictionThread.finished.connect(self.processingFinished)
+
+                self.predictionThread.start()
+                self.switchElementsToPrediction(True)
+
+            else:
+                self.progressPlainTextEdit.appendPlainText("Login cancelled.")
+
         else:
             # we first have to make sure that we terminate an already running
             self.predictionThread.terminate()
@@ -552,19 +555,12 @@ class PyMarAiGuiApp(QDialog):
             return None
 
         # microscope selection
-        microscope_index = self.microscopeComboBox.currentIndex()
-        if microscope_index <= 0:  # index 0 is "-"
+        microscope_text = self.microscopeComboBox.currentText()
+        if microscope_text.strip() == "-":
             self.progressPlainTextEdit.appendPlainText("No microscope selected.")
             return None
 
-        microscope_code = self.microscopes[microscope_index].split(":")[0].strip()
-
-        use_gpu = self.useGpuCheckBox.isChecked()
-        selected_device = self.deviceComboBox.currentText()
-
-        if not use_gpu:
-            selected_device = "cpu"
-            #self.progressPlainTextEdit.appendPlainText("Running on CPU.")
+        microscope_code = microscope_text.split(":")[0].strip()
 
         # Form the args list
         args = []
@@ -579,14 +575,10 @@ class PyMarAiGuiApp(QDialog):
         args.append("--microscope")
         args.append(microscope_code)
 
-        args.append("--device")
-        args.append(selected_device)
-
         self.progressPlainTextEdit.appendPlainText(f"Running prediction with:\n"
                                                    f"Input files: {input_files}\n"
                                                    f"Output dir: {output_dir}\n"
-                                                   f"Microscope: {microscope_code}\n"
-                                                   f"Device: {selected_device}\n")
+                                                   f"Microscope: {microscope_code}\n")
 
         return (predict.main, args)
 
@@ -715,6 +707,7 @@ class PyMarAiThread(QtCore.QThread):
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
 
+
 # thread to load data
 class FileLoaderWorker(QThread):
     filesLoaded = pyqtSignal(list, str)
@@ -740,10 +733,12 @@ class FileLoaderWorker(QThread):
 
         self.filesLoaded.emit(file_list, self.dir_path)
 
+
 # main function to start GUI
 def main():
     app = QApplication(sys.argv)
-    window = PyMarAiGuiApp()
+    config = AppConfig()
+    window = PyMarAiGuiApp(config)
     window.show()
     sys.exit(app.exec_())
 
