@@ -9,21 +9,27 @@ class ArgParser(argparse.ArgumentParser):
         self.print_help()
         self.exit(1)
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = sys.argv[1:]
+
     parser = ArgParser(
         prog="marai-predict",
         description='Start prediction (inference) for microscopic images of spheroids',
-        add_help=False
+        add_help=True
     )
 
-    parser.add_argument("--input", action="append", required=True, help="Input files")
+    parser.add_argument("--input", action="append", required=True, help="Input file(s) to process")
     parser.add_argument("--output", required=True, help="Directory to store output files")
     parser.add_argument("--microscope", required=True, help="Microscope ID used to obtain images")
 
-    # mutually exclusive mode selection
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--local", action="store_true", help="Run prediction locally")
     mode_group.add_argument("--remote", action="store_true", help="Run prediction remotely (default)")
+
+    # optional SSH credentials for remote (not passed via command line usually, but placeholder)
+    parser.add_argument("--ssh-username", help="SSH username for remote connection")
+    parser.add_argument("--ssh-password", help="SSH password for remote connection")
 
     parsed_args = parser.parse_args(args)
 
@@ -31,22 +37,29 @@ def main(args):
         input_files=parsed_args.input,
         microscope_number=parsed_args.microscope,
         output_dir=parsed_args.output,
-        use_local=parsed_args.local
+        use_local=parsed_args.local,
+        ssh_username=parsed_args.ssh_username,
+        ssh_password=parsed_args.ssh_password
     )
 
-def run_analysis(input_files, microscope_number, output_dir, use_local=False):
+def run_analysis(input_files, microscope_number, output_dir,
+                 use_local=False, ssh_username=None, ssh_password=None):
 
-    predictor = MarAiLocal() if use_local else MarAiRemote()
+    if use_local:
+        predictor = MarAiLocal()
+    else:
+        if ssh_username is not None and ssh_password is not None:
+            predictor = MarAiRemote(username=ssh_username, password=ssh_password)
+        else:
+            predictor = MarAiRemote()
 
-    for input_file in input_files:
-
-        try:
-            print(f"[INFO] Processing {input_file} ...")
-            predictor.predictSingleFile(
-                input_file=input_file,
-                microscope_number=microscope_number,
-                output_dir=output_dir
-            )
-            print(f"[DONE] {input_file}")
-        except Exception as e:
-            print(f"[ERROR] Failed to process {input_file}: {e}")
+    try:
+        print(f"[INFO] Processing {len(input_files)} files ...")
+        predictor.predictCall(
+            input_files=input_files,
+            microscope_number=microscope_number,
+            output_dir=output_dir,
+        )
+        print(f"[DONE] Processed {len(input_files)} files.")
+    except Exception as e:
+        print(f"[ERROR] Failed to process files: {e}")
