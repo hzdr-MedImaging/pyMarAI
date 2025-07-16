@@ -8,11 +8,10 @@ import login
 import predict
 
 from PyQt5 import QtCore
-from multiprocessing import Process, Pipe
+from multiprocessing import Pipe
 from threading import Thread
 
 from config import AppConfig
-from marai import MarAiRemote, MarAiLocal
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QCheckBox, QSpacerItem,
                              QProgressBar, QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem)
@@ -275,11 +274,11 @@ class PyMarAiGuiApp(QDialog):
     def loadInputDirectory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Input Folder")
         if dir_path:
-            self.settings.setValue("lastInputDir", dir_path)  # <== Save input folder
+            self.settings.setValue("lastInputDir", dir_path)
             self.loadFilesFromDirectory(dir_path)
 
     def loadFilesFromDirectory(self, dir_path):
-        self.progressPlainTextEdit.appendPlainText(f"Scanning directory: {dir_path}")
+        self.progressPlainTextEdit.appendPlainText(f"Scanning directory: {dir_path}.\n")
         self.inputFileListWidget.clear()
         self.setProgressBar("Loading files...")
         self.previewList = []
@@ -319,7 +318,7 @@ class PyMarAiGuiApp(QDialog):
             self.imageFilenameLabel.setText("")
 
     def onFileLoadError(self, error_message):
-        self.progressPlainTextEdit.appendPlainText(f"Error loading files: {error_message}")
+        self.progressPlainTextEdit.appendPlainText(f"Error loading files: {error_message}.\n")
         self.imagePreviewLabel.setText("Failed to load images")
 
     def fileLoadingFinished(self):
@@ -363,7 +362,7 @@ class PyMarAiGuiApp(QDialog):
             else:
                 pixmap = QPixmap(full_path)
                 if pixmap.isNull():
-                    raise ValueError("QPixmap could not load the image")
+                    raise ValueError("QPixmap could not load the image.\n")
                 width, height = pixmap.width(), pixmap.height()
 
             # Fixed height for preview
@@ -379,8 +378,8 @@ class PyMarAiGuiApp(QDialog):
             self.imagePreviewLabel.setText("")
 
         except Exception as e:
-            self.imagePreviewLabel.setText("Failed to load image")
-            print(f"Error loading image '{full_path}': {e}")
+            self.imagePreviewLabel.setText("Failed to load image.\n")
+            print(f"Error loading image '{full_path}': {e}.\n")
 
     def showNextImage(self):
         if self.previewList:
@@ -433,7 +432,7 @@ class PyMarAiGuiApp(QDialog):
     def openAnalyzedFile(self, item):
         text = item.text()
         if "[✓]" not in text:
-            self.progressPlainTextEdit.appendPlainText(f"'{text}' is not marked as analyzed. Skipping open with ROVER.")
+            self.progressPlainTextEdit.appendPlainText(f"'{text}' is not marked as analyzed. Skipping open with ROVER.\n")
             return
 
         filename = self.cleanFilename(text)
@@ -441,7 +440,7 @@ class PyMarAiGuiApp(QDialog):
 
         output_dir = self.outputFilePathTextEdit.text().strip()
         if not os.path.isdir(output_dir):
-            self.progressPlainTextEdit.appendPlainText("Output directory is not valid.")
+            self.progressPlainTextEdit.appendPlainText("Output directory is not valid.\n")
             return
 
         # Find all .v files matching the base filename in output_dir
@@ -459,11 +458,11 @@ class PyMarAiGuiApp(QDialog):
         ]
 
         if not vFiles:
-            self.progressPlainTextEdit.appendPlainText(f"No .v file found for '{filename}'.")
+            self.progressPlainTextEdit.appendPlainText(f"No .v file found for '{filename}'.\n")
             return
 
         if not rdfFiles:
-            self.progressPlainTextEdit.appendPlainText(f"No .rdf file found for '{filename}'.")
+            self.progressPlainTextEdit.appendPlainText(f"No .rdf file found for '{filename}'.\n")
             return
 
         # Show which files you will open
@@ -478,7 +477,7 @@ class PyMarAiGuiApp(QDialog):
                 # Correct way to pass command + arguments:
                 subprocess.Popen(["rover", "-R", "1", vFile])
             except Exception as e:
-                self.progressPlainTextEdit.appendPlainText(f"Failed to open {vFile}: {e}")
+                self.progressPlainTextEdit.appendPlainText(f"Failed to open {vFile}: {e}\n")
 
     #############################################
     # handle the event of Run Prediction button pressing
@@ -492,7 +491,7 @@ class PyMarAiGuiApp(QDialog):
                 username, password = login_dialog.get_credentials()
 
                 if not username or not password:
-                    self.progressPlainTextEdit.appendPlainText("Username or password cannot be empty.")
+                    self.progressPlainTextEdit.appendPlainText("Username or password cannot be empty.\n")
                     return
 
                 # save credentials in instance variable or pass them forward
@@ -520,7 +519,7 @@ class PyMarAiGuiApp(QDialog):
                 self.switchElementsToPrediction(True)
 
             else:
-                self.progressPlainTextEdit.appendPlainText("Login cancelled.")
+                self.progressPlainTextEdit.appendPlainText("Login cancelled.\n")
 
         else:
             # we first have to make sure that we terminate an already running
@@ -540,7 +539,7 @@ class PyMarAiGuiApp(QDialog):
         # collect input files
         selected_items = self.inputFileListWidget.selectedItems()
         if not selected_items:
-            self.progressPlainTextEdit.appendPlainText("No input files selected.")
+            self.progressPlainTextEdit.appendPlainText("No input files selected.\n")
             return None
 
         input_files = [
@@ -551,13 +550,13 @@ class PyMarAiGuiApp(QDialog):
         # output directory
         output_dir = self.outputFilePathTextEdit.text().strip()
         if not os.path.isdir(output_dir):
-            self.progressPlainTextEdit.appendPlainText("Invalid output directory.")
+            self.progressPlainTextEdit.appendPlainText("Invalid output directory.\n")
             return None
 
         # microscope selection
         microscope_text = self.microscopeComboBox.currentText()
         if microscope_text.strip() == "-":
-            self.progressPlainTextEdit.appendPlainText("No microscope selected.")
+            self.progressPlainTextEdit.appendPlainText("No microscope selected.\n")
             return None
 
         microscope_code = microscope_text.split(":")[0].strip()
@@ -605,21 +604,19 @@ class PyMarAiGuiApp(QDialog):
         self.progressBarLabel.hide()
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
+        self.switchElementsToPrediction(False)
 
 class PyMarAiThread(QtCore.QThread):
-
     def __init__(self, parent, processJobs):
-        QtCore.QThread.__init__(self)
+        super().__init__()
         self.parent = parent
         self.processJobs = processJobs
 
-        # create pipes through which we can
-        # communicate with the thread
+        # create pipe to communicate with the thread
         mother_pipe, child_pipe = Pipe()
         self.transport = child_pipe
 
-        # create an emitter object which will perform
-        # the message communication with our main GUI thread.
+        # create an emitter to forward messages to GUI
         self.emitter = self.Emitter(mother_pipe)
         self.emitter.message.connect(self.parent.showProgressMessage)
         self.emitter.start()
@@ -629,39 +626,32 @@ class PyMarAiThread(QtCore.QThread):
         sys.stdout = self.StdIORedirector(self.transport)
         sys.stderr = self.StdIORedirector(self.transport)
 
-        # let's iterate through our targets and execute
-        # one after another
         for job in self.processJobs:
+            app_name = job.get('app', 'Prediction')
+            self.parent.setProgressBar(f"Running '{app_name}'")
 
-            # set the progressBar
-            self.parent.setProgressBar("Running '" + job['app'] + "'")
-
-            # on Windows with python < 3.5 we have to use subprocess.Popen() as a workaround
-            # for python problems with multiprocessing.Process functionality
             if platform.system() == 'Windows' and sys.version_info < (3, 5):
-                cmd = [item for sublist in [[job['app']], job['args']] for item in sublist]
+                # fallback to subprocess for older Windows Python versions
+                cmd = [item for sublist in [[job['app']], job['cli_args']] for item in sublist]
                 p = subprocess.Popen(cmd, bufsize=0, universal_newlines=True, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT)
-                while p.poll() == None:
+                while p.poll() is None:
                     output = p.stdout.readline()
                     if output:
                         print(output, end='')
                 p.wait()
             else:
-                # For Linux or Python version >= 3.5 we can directly use multiprocessing.Process
+                # run run_analysis with kwargs in a separate process
                 p = self.Process(target=job['target'], args=job['args'], stdout=sys.stdout, stderr=sys.stderr)
+
                 p.start()
                 p.join()
 
-        # clear the progressBar
         self.parent.setProgressBar()
-
-        # reset the stdio stuff
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__
 
     class StdIORedirector(object):
-
         def __init__(self, transport):
             self.transport = transport
 
@@ -683,16 +673,15 @@ class PyMarAiThread(QtCore.QThread):
         def run(self):
             while True:
                 try:
-                    signature = self.transport.recv()
+                    msg = self.transport.recv()
                 except EOFError:
                     break
                 else:
-                    self.message.emit(signature)
+                    self.message.emit(msg)
 
     class Process(multiprocessing.Process):
-
         def __init__(self, target, args, stdout, stderr):
-            super(Process, self).__init__(daemon=True)
+            super().__init__(daemon=True)
             self.target = target
             self.args = args
             self.stdout = stdout
@@ -701,9 +690,7 @@ class PyMarAiThread(QtCore.QThread):
         def run(self):
             sys.stdout = self.stdout
             sys.stderr = self.stderr
-
             self.target(self.args)
-
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__
 
@@ -719,7 +706,7 @@ class FileLoaderWorker(QThread):
 
     def run(self):
         if not os.path.isdir(self.dir_path):
-            self.errorOccurred.emit("Selected input directory is invalid.")
+            self.errorOccurred.emit("Selected input directory is invalid.\n")
             return
 
         file_list = [
@@ -728,7 +715,7 @@ class FileLoaderWorker(QThread):
         ]
 
         if not file_list:
-            self.errorOccurred.emit("No compatible image files (.tif or .png) found in the selected folder.")
+            self.errorOccurred.emit("No compatible image files (.tif or .png) found in the selected folder.\n")
             return
 
         self.filesLoaded.emit(file_list, self.dir_path)
