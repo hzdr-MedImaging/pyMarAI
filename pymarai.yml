@@ -8,8 +8,8 @@ microscopes:
 default_microscope: "-"
 
 utils:
-  mic2ecat: "/opt/spheroids-dnn/bin/mic2ecat"
-  roi2Rdf: "/opt/spheroids-dnn/bin/roi2rdf"
+  mic2ecat: "/usr/local/petlib/bin/mic2ecat"
+  roi2Rdf: "/usr/local/petlib/bin/roi2Rdf"
   nnunet_predict: "/opt/conda/envs/nnunet/bin/nnUNetv2_predict"
 
 nnunet:
@@ -22,17 +22,16 @@ nnunet:
 
 machines:
   - saturn:
-      - 149.220.74.18
-      - { default: true }
-      - cpu: true
-      - gpu: false
+        ip: 149.220.74.18
+        default: true
+        cpu: true
+        gpu: false
   - vega:
-      - 149.220.74.70
-      - cpu: false
-      - gpu: true
+        ip: 149.220.74.70
+        cpu: false
+        gpu: true
   - lyra:
-      - 149.220.74.204
-      - cpu: false
-      - gpu: true
-
+        ip: 149.220.74.204
+        cpu: false
+        gpu: true
 
