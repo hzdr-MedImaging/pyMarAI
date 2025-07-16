@@ -1,5 +1,6 @@
 import sys
 import argparse
+import traceback
 from marai import MarAiLocal, MarAiRemote
 
 # custom ArgParser for better GUI integration
@@ -10,8 +11,6 @@ class ArgParser(argparse.ArgumentParser):
         self.exit(1)
 
 def main(args=None):
-    if args is None:
-        args = sys.argv[1:]
 
     parser = ArgParser(
         prog="marai-predict",
@@ -43,23 +42,29 @@ def main(args=None):
     )
 
 def run_analysis(input_files, microscope_number, output_dir,
-                 use_local=False, ssh_username=None, ssh_password=None):
+                use_local=False, ssh_username=None, ssh_password=None,
+                log_fn=print):
+
+    log_fn(f"[INFO] run_analysis called with input_files={input_files}, microscope_number={microscope_number}, output_dir={output_dir}, use_local={use_local}\n")
 
     if use_local:
+        log_fn("[INFO] Using local predictor\n")
         predictor = MarAiLocal()
     else:
-        if ssh_username is not None and ssh_password is not None:
-            predictor = MarAiRemote(username=ssh_username, password=ssh_password)
-        else:
-            predictor = MarAiRemote()
+        log_fn("[INFO] Using remote predictor\n")
+        predictor = MarAiRemote(username=ssh_username, password=ssh_password)
 
     try:
-        print(f"[INFO] Processing {len(input_files)} files ...")
+        log_fn(f"[INFO] Processing {len(input_files)} files ...\n")
         predictor.predictCall(
             input_files=input_files,
             microscope_number=microscope_number,
             output_dir=output_dir,
         )
-        print(f"[DONE] Processed {len(input_files)} files.")
+        log_fn(f"[DONE] Processed {len(input_files)} files.\n")
     except Exception as e:
-        print(f"[ERROR] Failed to process files: {e}")
+        log_fn(f"[ERROR] Failed to process files: {e}\n")
+        log_fn(traceback.format_exc())
+
+if __name__ == "__main__":
+    main()
