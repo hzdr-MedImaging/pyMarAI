@@ -14,9 +14,16 @@ class AppConfig:
 
         self.microscopes = self.config.get("microscopes", [])
         self.default_microscope = self.config.get("default_microscope", "-")
+        self.machines = self.config.get("machines", {})
 
     def get_microscopes(self):
         return self.config.get("microscopes", [])
 
     def get_default_microscope(self):
         return self.default_microscope
+
+    def get_default_remote_hostname(self):
+        for machine_name, machine_details in self.machines.items():
+            if machine_details.get('default') is True:
+                return machine_details.get('ip')
+        return None
