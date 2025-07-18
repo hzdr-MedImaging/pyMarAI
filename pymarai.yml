@@ -21,17 +21,16 @@ nnunet:
   folds: [0, 1, 2, 3, 4]
 
 machines:
-  - saturn:
-        ip: 149.220.74.18
-        default: true
-        cpu: true
-        gpu: false
-  - vega:
-        ip: 149.220.74.70
-        cpu: false
-        gpu: true
-  - lyra:
-        ip: 149.220.74.204
-        cpu: false
-        gpu: true
-
+  saturn:
+      ip: 149.220.74.18
+      default: true
+      cpu: true
+      gpu: false
+  vega:
+      ip: 149.220.74.70
+      cpu: false
+      gpu: true
+  lyra:
+      ip: 149.220.74.204
+      cpu: false
+      gpu: true
