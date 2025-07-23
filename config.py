@@ -21,9 +21,3 @@ class AppConfig:
 
     def get_default_microscope(self):
         return self.default_microscope
-
-    def get_default_remote_hostname(self):
-        for machine_name, machine_details in self.machines.items():
-            if machine_details.get('default') is True:
-                return machine_details.get('ip')
-        return None
