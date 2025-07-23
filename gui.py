@@ -16,10 +16,10 @@ from multiprocessing import Pipe
 from config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QProgressBar, QWidget, QTabWidget,
-                             QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox)
+                             QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QToolButton)
 
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QPixmap, QImage, QIcon
 from PIL import Image, ImageOps
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,7 +49,6 @@ class PyMarAiGuiApp(QDialog):
     processing_started_signal = pyqtSignal()
     update_retrain_progress_text_signal = pyqtSignal(str)
 
-
     # we use constructor to create the GUI layout
     def __init__(self, config: AppConfig, parent=None):
         super(PyMarAiGuiApp, self).__init__(parent)
@@ -68,7 +67,9 @@ class PyMarAiGuiApp(QDialog):
         self.currentImageIsPillow = False
 
         self.previewList = []
+        self.retrainPreviewList = []
         self.previewIndex = 0
+        self.retrainPreviewIndex = 0
         self.predictionThread = None
         self.retrainThread = None
         self.fileLoader = None
@@ -80,7 +81,6 @@ class PyMarAiGuiApp(QDialog):
         self.processing_finished_signal.connect(self.processingFinished)
         self.processing_started_signal.connect(self.processingStarted)
         self.update_retrain_progress_text_signal.connect(self.showRetrainProgressMessage)
-
 
         self.tab_widget = QTabWidget()
         self.prediction_tab = QWidget()
@@ -107,11 +107,14 @@ class PyMarAiGuiApp(QDialog):
         self.inputDirButton = self.createButton("Browse", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
+        self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
+
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.inputFileListWidget.setFixedHeight(375)
-        self.inputFileListWidget.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileListWidget.itemClicked.connect(self.showImageOnItemClick)
         self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
 
         self.imagePreviewLabel = self.createLabel("Image Preview")
@@ -129,6 +132,7 @@ class PyMarAiGuiApp(QDialog):
         self.nextButton = self.createButton("Next", self.showNextImage)
 
         navLayout = QHBoxLayout()
+        navLayout.addStretch()
         navLayout.addWidget(self.imageFilenameLabel)
         navLayout.addWidget(self.prevButton)
         navLayout.addWidget(self.nextButton)
@@ -137,6 +141,7 @@ class PyMarAiGuiApp(QDialog):
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
+        inputFilePathButtonsLayout.addWidget(self.openRoverButton)
         inputFilePathButtonsLayout.addStretch()
 
         inputFileShowLayout = QHBoxLayout()
@@ -237,8 +242,9 @@ class PyMarAiGuiApp(QDialog):
         self.retrainInputFileListWidget = QListWidget()
         self.retrainInputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.retrainInputFileListWidget.setFixedHeight(375)
-        self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
+        self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
 
         self.retrainImagePreviewLabel = self.createLabel("Image Preview")
         self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -560,6 +566,18 @@ class PyMarAiGuiApp(QDialog):
             self.retrainImagePreviewLabel.setText("Image Preview")
             self.retrainImageFilenameLabel.setText("No file selected")
 
+    def showImageOnItemClick(self, item):
+        filename = self.cleanFilename(item.text())
+        self.previewList = [filename]
+        self.previewIndex = 0
+        self.showImageAtIndex(self.previewIndex)
+
+    def showRetrainImageOnItemClick(self, item):
+        filename = self.cleanFilename(item.text())
+        self.retrainPreviewList = [filename]
+        self.retrainPreviewIndex = 0
+        self.showRetrainImageAtIndex(self.retrainPreviewIndex)
+
     def showImageAtIndex(self, index):
         if not self.previewList:
             self.imagePreviewLabel.setText("No files selected")
@@ -672,7 +690,7 @@ class PyMarAiGuiApp(QDialog):
                     if not mask_file_to_use:
                         raise FileNotFoundError("Mask file could not be determined or generated.")
 
-                    # Read and normalize mask
+                    # read and normalize mask
                     mask_data_pmedio = pmedio.read(mask_file_to_use)
                     mask_data = mask_data_pmedio.toarray()
                     mask_data_squeezed = np.squeeze(mask_data)
@@ -683,38 +701,39 @@ class PyMarAiGuiApp(QDialog):
                     else:
                         normalized_mask_data = np.zeros_like(mask_data_squeezed, dtype=np.uint8)
 
-                    mask_pil = Image.fromarray(normalized_mask_data.T) # Transpose if necessary based on data orientation
+                    mask_pil = Image.fromarray(normalized_mask_data.T) # transpose if necessary based on data orientation
                     if mask_pil.mode != 'L':
                         mask_pil = mask_pil.convert('L')
 
                     mask_pil = mask_pil.rotate(180, expand=False)
                     mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
 
-                    # Yellow overlay
-                    overlay_color = (255, 255, 0) # Yellow
-                    alpha = 100 # Transparency
+                    # overlay
+                    overlay_color = (4, 95, 208)
+                    alpha = 100 # transparency
                     overlay_image = Image.new('RGBA', original_image_pil.size, (0, 0, 0, 0))
                     pixels = overlay_image.load()
                     mask_pixels = mask_pil.load()
 
                     for y in range(original_image_pil.size[1]):
                         for x in range(original_image_pil.size[0]):
-                            # Apply overlay if the normalized mask pixel is not zero (i.e., it has some value)
+                            # apply overlay if the normalized mask pixel is not zero
                             if mask_pixels[x, y] > 0:
                                 pixels[x, y] = overlay_color + (alpha,)
 
-                    # Composite the original image with the overlay
+                    # composite the original image with the overlay
                     combined_image_pil = Image.alpha_composite(original_image_pil.convert('RGBA'), overlay_image)
                     qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
                                   combined_image_pil.width, combined_image_pil.height,
                                   QImage.Format_RGBA8888)
                     pixmap = QPixmap.fromImage(qimg)
+
                 else:
                     # if analyzed files are marked but not found, fall back to original image
                     self.update_progress_text_signal.emit(f"[WARNING] Analyzed files ({v_file_path_in_output}, {rdf_file_path_in_output}) not found for '{filename}'. Displaying original input image.\n")
                     raise FileNotFoundError("Analyzed files not found, displaying original.")
             else:
-                # Fallback to the original image display logic for non-analyzed files
+                # fallback to the original image display logic for non-analyzed files
                 if full_input_path.lower().endswith(".tif"):
                     image = Image.open(full_input_path)
                     image = ImageOps.exif_transpose(image)
@@ -866,8 +885,8 @@ class PyMarAiGuiApp(QDialog):
                 mask_pil = mask_pil.convert('L')
             mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
 
-            # yellow overlay
-            overlay_color = (255, 255, 0)
+            # overlay
+            overlay_color = (4, 95, 208)
             alpha = 100
             red_overlay = Image.new('RGBA', original_image_pil.size, (0, 0, 0, 0))
             pixels = red_overlay.load()
@@ -910,6 +929,21 @@ class PyMarAiGuiApp(QDialog):
             self.previewIndex = (self.previewIndex - 1 + len(self.previewList)) % len(self.previewList)
             self.showImageAtIndex(self.previewIndex)
 
+    def updatePreviewImage(self):
+        if not self.currentImage:
+            self.imagePreviewLabel.setText("No image to display")
+            return
+
+        # calculate the scale factor from the zoom step
+        scale_factor = 1.0 + self.zoomStep * 0.1
+        new_width = int(self.currentImage.width() * scale_factor)
+        new_height = int(self.currentImage.height() * scale_factor)
+
+        scaled_pixmap = self.currentImage.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.imagePreviewLabel.setPixmap(scaled_pixmap)
+        self.imagePreviewLabel.setText("")
+        self.imagePreviewLabel.resize(new_width, new_height)
+
     def showNextRetrainImage(self):
         if self.retrainPreviewList:
             self.retrainPreviewIndex = (self.retrainPreviewIndex + 1) % len(self.retrainPreviewList)
@@ -929,6 +963,23 @@ class PyMarAiGuiApp(QDialog):
         self.inputFileListWidget.clearSelection()
         self.updatePreviewList()
 
+    def openAllSelectedFilesInRover(self):
+        selected_items = self.inputFileListWidget.selectedItems()
+        if not selected_items:
+            self.update_progress_text_signal.emit("[ERROR] No files selected to open in ROVER.\n")
+            return
+
+        # prepare the list of filenames
+        selected_filenames = [self.cleanFilename(item.text()) for item in selected_items if "[✓]" in item.text()]
+
+        if not selected_filenames:
+            self.update_progress_text_signal.emit(
+                "[ERROR] None of the selected files are marked as analyzed. Skipping.\n")
+            return
+
+        # call the new method with the list of files
+        self.openMultipleFilesInRover(selected_filenames)
+
     def selectAllRetrainFiles(self):
         self.retrainInputFileListWidget.selectAll()
         self.updateRetrainPreviewList()
@@ -939,7 +990,7 @@ class PyMarAiGuiApp(QDialog):
 
     # --- Progress Bar Handling ---
     def setProgressBarText(self, text=None):
-        # This is specifically for the prediction tab's progress bar
+        # this is specifically for the prediction tab's progress bar
         if text is None:
             self.progressBarLabel.setText("")
             self.progressBar.setValue(0)
@@ -954,7 +1005,7 @@ class PyMarAiGuiApp(QDialog):
             self.progressBarLabel.show()
 
     def updateProgressBarDetailed(self, current_count, total_count, filename):
-        # This is specifically for the prediction tab's progress bar
+        # this is specifically for the prediction tab's progress bar
         if total_count > 0:
             percentage = int((current_count / total_count) * 100)
             self.progressBar.setMaximum(total_count)
@@ -972,63 +1023,66 @@ class PyMarAiGuiApp(QDialog):
     def switchElementsToPrediction(self, isPrediction):
         if isPrediction:
             self.predictionButton.setText("Stop")
-            self.predictionButton.setEnabled(True)  # Keep enabled to allow stopping
+            self.predictionButton.setEnabled(True)  # keep enabled to allow stopping
         else:
             self.predictionButton.setText("Run Prediction")
-            self.predictionButton.setEnabled(True)  # Re-enable after prediction finishes or stops
+            self.predictionButton.setEnabled(True)  # re-enable after prediction finishes or stops
 
     def openAnalyzedFile(self, item):
         text = item.text()
+        filename = self.cleanFilename(text)
+
         if "[✓]" not in text:
             self.update_progress_text_signal.emit(
-                f"'[ERROR] {self.cleanFilename(text)}' is not marked as analyzed. Skipping open with ROVER.\n")
+                f"[ERROR] '{filename}' is not marked as analyzed. Skipping open with ROVER.\n")
             return
 
-        filename = self.cleanFilename(text)
-        base = os.path.splitext(filename)[0]
+        # Call the new method with a single file
+        self.openMultipleFilesInRover([filename])
 
+    def openMultipleFilesInRover(self, selected_filenames):
         output_dir = self.outputFilePathTextEdit.text().strip()
         if not os.path.isdir(output_dir):
             self.update_progress_text_signal.emit("[ERROR] Output directory is not valid.\n")
+            QMessageBox.warning(self, "Open in ROVER", "Please select a valid output directory.")
             return
 
-        # find all .v files matching the base filename in output_dir
-        vFiles = [
-            os.path.join(output_dir, f)
-            for f in os.listdir(output_dir)
-            if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.v')
-        ]
+        v_files_to_open = []
+        for filename in selected_filenames:
+            base, _ = os.path.splitext(filename)
 
-        # find all .rdf files matching the base filename in output_dir
-        rdfFiles = [
-            os.path.join(output_dir, f)
-            for f in os.listdir(output_dir)
-            if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.rdf')
-        ]
+            # Find all .v files matching the base filename
+            vFiles = [
+                os.path.join(output_dir, f)
+                for f in os.listdir(output_dir)
+                if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.v')
+            ]
 
-        if not vFiles:
-            self.update_progress_text_signal.emit(f"[ERROR] No .v file found for '{filename}'.\n")
+            if not vFiles:
+                self.update_progress_text_signal.emit(f"[ERROR] No .v file found for '{filename}'. Skipping.\n")
+            else:
+                v_files_to_open.extend(vFiles)
+
+        if not v_files_to_open:
+            self.update_progress_text_signal.emit("[ERROR] No valid .v files found to open in ROVER.\n")
+            QMessageBox.warning(self, "Open in ROVER", "No valid files were found to open.")
             return
 
-        if not rdfFiles:
-            self.update_progress_text_signal.emit(f"[ERROR] No .rdf file found for '{filename}'.\n")
-            return
+        # Prepare the command to open all .v files in a single ROVER instance
+        command = ["rover", "-R", "1"] + v_files_to_open
 
-        # show which files you will open
+        # Log the command and files
         self.update_progress_text_signal.emit(
-            f"Opening ROVER for '{filename}':\n"
-            + "\n".join(vFiles + rdfFiles) + "\n"
+            f"Opening {len(v_files_to_open)} file(s) in ROVER:\n"
+            + "\n".join(v_files_to_open) + "\n"
         )
 
-        # open each .v file with rover, with -R 1 option
-        for vFile in vFiles:
-            try:
-                # Correct way to pass command + arguments:
-                subprocess.Popen(["rover", "-R", "1", vFile])
-            except Exception as e:
-                self.update_progress_text_signal.emit(f"[ERROR] Failed to open {vFile}: {e}\n")
-                QMessageBox.warning(self, "Error Opening ROVER",
-                                    f"Could not open ROVER for {os.path.basename(vFile)}: {e}\nPlease ensure ROVER is installed and in your system PATH.")
+        try:
+            subprocess.Popen(command)
+        except Exception as e:
+            self.update_progress_text_signal.emit(f"[ERROR] Failed to open ROVER: {e}\n")
+            QMessageBox.warning(self, "Error Opening ROVER",
+                                f"Could not open ROVER for selected files: {e}\nPlease ensure ROVER is installed and in your system PATH.")
 
     #############################################
     # handle the event of Run Prediction button pressing
@@ -1093,9 +1147,24 @@ class PyMarAiGuiApp(QDialog):
             QMessageBox.warning(self, "Input Error", "Please select input files.")
             return None
 
+        # Filter out files that have already been analyzed
+        unprocessed_items = [item for item in selected_items if "[✓]" not in item.text()]
+        processed_items = [item for item in selected_items if "[✓]" in item.text()]
+
+        if not unprocessed_items:
+            self.update_progress_text_signal.emit(
+                "[INFO] All selected files are already analyzed. No new predictions will be run.\n")
+            QMessageBox.information(self, "Prediction Info", "All selected files are already analyzed.")
+            return None
+
+        if processed_items:
+            processed_filenames = [self.cleanFilename(item.text()) for item in processed_items]
+            self.update_progress_text_signal.emit(
+                f"[INFO] Skipping the following already analyzed files: {', '.join(processed_filenames)}\n")
+
         input_files = [
             os.path.join(self.selectedInputDirectory, self.cleanFilename(item.text()))
-            for item in selected_items
+            for item in unprocessed_items
         ]
 
         # output directory
@@ -1121,7 +1190,7 @@ class PyMarAiGuiApp(QDialog):
             QMessageBox.warning(self, "Input Error", "Invalid microscope selection.")
             return None
 
-        self.update_progress_text_signal.emit(f"Running prediction with:\n"
+        self.update_progress_text_signal.emit(f"Running prediction with {len(input_files)} file(s).\n"
                                               f"Input files: {input_files}\n"
                                               f"Output dir: {output_dir}\n"
                                               f"Microscope: {microscope_number}\n")
