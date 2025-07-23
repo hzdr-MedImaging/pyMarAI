@@ -5,6 +5,10 @@ import multiprocessing
 import logging
 import login
 import predict
+import shutil
+import numpy as np
+import pmedio
+import time
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe
@@ -22,7 +26,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
 class StdIORedirector:
   def __init__(self, pipe_connection):
     self.pipe = pipe_connection
@@ -35,15 +38,17 @@ class StdIORedirector:
         logger.error(f"[ERROR] Error writing to pipe in StdIORedirector: {e}")
 
   def flush(self):
-    # No-op for pipes, as send is usually immediate
+    # no-op for pipes, as send is usually immediate
     pass
 
 class PyMarAiGuiApp(QDialog):
-    # Signals to update GUI from worker threads/processes
+    # signals to update GUI from worker threads/processes
     update_progress_text_signal = pyqtSignal(str)
     update_progress_bar_signal = pyqtSignal(int, int, str)
     processing_finished_signal = pyqtSignal()
     processing_started_signal = pyqtSignal()
+    update_retrain_progress_text_signal = pyqtSignal(str)
+
 
     # we use constructor to create the GUI layout
     def __init__(self, config: AppConfig, parent=None):
@@ -74,18 +79,20 @@ class PyMarAiGuiApp(QDialog):
         self.update_progress_bar_signal.connect(self.updateProgressBarDetailed)
         self.processing_finished_signal.connect(self.processingFinished)
         self.processing_started_signal.connect(self.processingStarted)
+        self.update_retrain_progress_text_signal.connect(self.showRetrainProgressMessage)
+
 
         self.tab_widget = QTabWidget()
         self.prediction_tab = QWidget()
-        self.retrain_tab = QWidget() # New: Retrain tab
+        self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        self.tab_widget.addTab(self.retrain_tab, "Re-training") # New: Add re-training tab
+        self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.setupPredictionTab()
-        self.setupRetrainTab() # New: Setup re-training tab
+        self.setupRetrainTab()
 
-        main_layout = QVBoxLayout(self) # Changed to QVBoxLayout for the tab widget
+        main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.tab_widget)
 
         self.setWindowTitle("Spheroids-DNN: Auto Inference Tool")
@@ -232,7 +239,6 @@ class PyMarAiGuiApp(QDialog):
         self.retrainInputFileListWidget.setFixedHeight(375)
         self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.MultiSelection)
         self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
-        # self.retrainInputFileListWidget.itemDoubleClicked.connect(self.openRetrainFile) # Future visualization
 
         self.retrainImagePreviewLabel = self.createLabel("Image Preview")
         self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -249,6 +255,7 @@ class PyMarAiGuiApp(QDialog):
         self.retrainNextButton = self.createButton("Next", self.showNextRetrainImage)
 
         retrainNavLayout = QHBoxLayout()
+        retrainNavLayout.addStretch()
         retrainNavLayout.addWidget(self.retrainImageFilenameLabel)
         retrainNavLayout.addWidget(self.retrainPrevButton)
         retrainNavLayout.addWidget(self.retrainNextButton)
@@ -431,25 +438,24 @@ class PyMarAiGuiApp(QDialog):
             self.loadRetrainFilesFromDirectory(dir_path)
 
     def loadFilesFromDirectory(self, dir_path):
-        self.update_progress_text_signal.emit(f"Scanning directory for prediction: {dir_path}.\n")
+        self.update_progress_text_signal.emit(f"Scanning directory for prediction files: {dir_path}.\n") # Updated message
         self.inputFileListWidget.clear()
         self.setProgressBarText("Loading files...")
         self.previewList = []
 
-        self.processingRunning = True  
-        self.enableWidgets(False)  
-        self.predictionButton.setEnabled(False) 
+        self.processingRunning = True
+        self.enableWidgets(False)
+        self.predictionButton.setEnabled(False)
 
         self.fileLoader = FileLoaderWorker(dir_path, (".tif", ".png"))
         self.fileLoader.filesLoaded.connect(self.onPredictionFilesLoaded)
         self.fileLoader.errorOccurred.connect(self.onFileLoadError)
-        self.fileLoader.finished.connect(self.fileLoadingFinished)
+        self.fileLoader.finished.connect(self.predictionFileLoadingFinished)
         self.fileLoader.start()
 
     def loadRetrainFilesFromDirectory(self, dir_path):
-        self.update_progress_text_signal.emit(f"Scanning directory for re-training: {dir_path}.\n")
+        self.update_retrain_progress_text_signal.emit(f"Scanning directory for re-training files: {dir_path}.\n")
         self.retrainInputFileListWidget.clear()
-        #self.setRetrainProgressBarText("Loading files...")
         self.retrainPreviewList = []
 
         self.processingRunning = True
@@ -459,8 +465,8 @@ class PyMarAiGuiApp(QDialog):
 
         self.retrainFileLoader = FileLoaderWorker(dir_path, (".v", ".rdf"))
         self.retrainFileLoader.filesLoaded.connect(self.onRetrainFilesLoaded)
-        self.retrainFileLoader.errorOccurred.connect(self.onFileLoadError)
-        self.retrainFileLoader.finished.connect(self.fileLoadingFinished)
+        self.retrainFileLoader.errorOccurred.connect(self.showRetrainProgressMessage)
+        self.retrainFileLoader.finished.connect(self.retrainFileLoadingFinished)
         self.retrainFileLoader.start()
 
     def onPredictionFilesLoaded(self, file_list, dir_path):
@@ -472,7 +478,7 @@ class PyMarAiGuiApp(QDialog):
             item = QListWidgetItem(file)
             self.inputFileListWidget.addItem(item)
 
-        self.markAnalyzedFiles() 
+        self.markAnalyzedFiles()
 
         if file_list:
             self.previewList = []
@@ -485,7 +491,7 @@ class PyMarAiGuiApp(QDialog):
             self.imagePreviewLabel.setText("No image files found")
             self.imageFilenameLabel.setText("")
 
-        self.update_progress_text_signal.emit(f"Found {len(file_list)} compatible files for prediction.\n")
+        self.update_progress_text_signal.emit(f"Found {len(file_list)} compatible prediction files.\n") # Updated message
 
     def onRetrainFilesLoaded(self, file_list, dir_path):
         self.selectedRetrainInputDirectory = dir_path
@@ -507,17 +513,26 @@ class PyMarAiGuiApp(QDialog):
             self.retrainImagePreviewLabel.setText("No .v or .rdf files found")
             self.retrainImageFilenameLabel.setText("")
 
-        self.update_progress_text_signal.emit(f"Found {len(file_list)} compatible files for re-training.\n")
+        self.update_retrain_progress_text_signal.emit(f"Found {len(file_list)} compatible re-training files.\n")
 
     def onFileLoadError(self, error_message):
-        self.update_progress_text_signal.emit(f"[ERROR] Error loading files: {error_message}.\n")
+        self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction files: {error_message}.\n")
         self.imagePreviewLabel.setText("Failed to load images")
 
-    def fileLoadingFinished(self):
+    # prediction tab file loading completion
+    def predictionFileLoadingFinished(self):
         self.processingRunning = False
-        self.setProgressBarText()  
-        self.enableWidgets(True)  
-        self.predictionButton.setEnabled(True)  
+        self.setProgressBarText()
+        self.enableWidgets(True)
+        self.predictionButton.setEnabled(True)
+        self.updateOutputBasenames()
+        self.markAnalyzedFiles()
+
+    # re-training tab file loading completion
+    def retrainFileLoadingFinished(self):
+        self.processingRunning = False
+        self.enableWidgets(True)
+        self.predictionButton.setEnabled(True)
 
     def updatePreviewList(self):
         items = self.inputFileListWidget.selectedItems()
@@ -552,33 +567,177 @@ class PyMarAiGuiApp(QDialog):
 
         filename = self.previewList[index]
         self.imageFilenameLabel.setText(filename)
-        full_path = os.path.join(self.selectedInputDirectory, filename)
+        full_input_path = os.path.join(self.selectedInputDirectory, filename)
+        output_dir = self.outputFilePathTextEdit.text().strip()
+
+        # check if the current item is marked as analyzed
+        current_item = None
+        for i in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(i)
+            if self.cleanFilename(item.text()) == filename:
+                current_item = item
+                break
+
+        is_analyzed_file = current_item and "[✓]" in current_item.text()
+
         self.imagePreviewLabel.setText("Loading...")
 
         try:
-            if full_path.lower().endswith(".tif"):
-                image = Image.open(full_path)
-                image = ImageOps.exif_transpose(image)
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
+            if is_analyzed_file and os.path.isdir(output_dir):
+                base_name, _ = os.path.splitext(filename)
+                v_file_path_in_output = os.path.join(output_dir, base_name + ".v")
+                rdf_file_path_in_output = os.path.join(output_dir, base_name + ".rdf")
+                generated_mask_path = os.path.join(output_dir, base_name + "_cnn.v") # thrass output
 
-                data = image.tobytes("raw", "RGB")
-                width, height = image.size
-                qimg = QImage(data, width, height, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimg)
+                if os.path.exists(v_file_path_in_output) and os.path.exists(rdf_file_path_in_output):
+                    # load the original input image (tif/png) as the background
+                    if full_input_path.lower().endswith(".tif"):
+                        original_image_pil = Image.open(full_input_path)
+                        original_image_pil = ImageOps.exif_transpose(original_image_pil)
+                        if original_image_pil.mode != "RGB":
+                            original_image_pil = original_image_pil.convert("RGB")
+                    else: # assuming .png
+                        original_image_pil = Image.open(full_input_path)
+                        if original_image_pil.mode != "RGB":
+                            original_image_pil = original_image_pil.convert("RGB")
+
+                    # use timestamp from .v file in output directory to tag cache
+                    try:
+                        v_file_mtime = os.path.getmtime(v_file_path_in_output)
+                        v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
+                    except Exception as e:
+                        self.update_progress_text_signal.emit(f"[ERROR] Failed to get timestamp for {v_file_path_in_output}: {e}\n")
+                        raise
+
+                    cache_dir = "/tmp/marai_cnn_masks_prediction" # Separate cache for prediction tab
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_mask_name = f"{base_name}_{v_file_timestamp}_cnn.v"
+                    cached_mask_path = os.path.join(cache_dir, cached_mask_name)
+
+                    mask_file_to_use = None
+
+                    # reuse only if cache exists and is newer than source file
+                    if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
+                        self.update_progress_text_signal.emit(f"[INFO] Using cached mask for prediction: {cached_mask_path}\n")
+                        mask_file_to_use = cached_mask_path
+                    else:
+                        self.update_progress_text_signal.emit(f"Running thrass for mask generation on {os.path.basename(v_file_path_in_output)} in output directory...\n")
+
+                        # thrass command executed in the output directory
+                        thrass_command = ["thrass", "-t", "cnnPrepare", "-b", os.path.basename(v_file_path_in_output)]
+                        env = os.environ.copy()
+                        result = subprocess.run(
+                            thrass_command,
+                            capture_output=True,
+                            text=True,
+                            cwd=output_dir, # Execute thrass in the output directory
+                            env=env
+                        )
+
+                        self.update_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
+                        if result.stderr:
+                            self.update_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
+
+                        if result.returncode != 0:
+                            raise RuntimeError(f"Thrass failed with exit code {result.returncode} for file: {v_file_path_in_output}")
+
+                        # wait briefly for file to appear
+                        wait_time = 0
+                        max_wait = 5
+                        while not os.path.exists(generated_mask_path) and wait_time < max_wait:
+                            time.sleep(0.5)
+                            wait_time += 0.5
+
+                        if not os.path.exists(generated_mask_path):
+                            raise FileNotFoundError(
+                                f"Thrass mask file not found at: {generated_mask_path}\n"
+                                f"Check if RDF is missing or malformed for {v_file_path_in_output}."
+                            )
+
+                        # copy to cache
+                        shutil.copy2(str(generated_mask_path), str(cached_mask_path))
+                        self.update_progress_text_signal.emit(f"[INFO] Cached mask for prediction: {cached_mask_path}\n")
+                        mask_file_to_use = cached_mask_path
+
+                        # cleanup thrass output in the directory where it was generated
+                        for fname in os.listdir(output_dir):
+                            if fname.startswith(base_name + "_cnn") and fname.endswith(".v"):
+                                try:
+                                    os.remove(os.path.join(output_dir, fname))
+                                    self.update_progress_text_signal.emit(
+                                        f"[INFO] Deleted Thrass output file: {fname}\n")
+                                except Exception as e:
+                                    self.update_progress_text_signal.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
+
+                    if not mask_file_to_use:
+                        raise FileNotFoundError("Mask file could not be determined or generated.")
+
+                    # Read and normalize mask
+                    mask_data_pmedio = pmedio.read(mask_file_to_use)
+                    mask_data = mask_data_pmedio.toarray()
+                    mask_data_squeezed = np.squeeze(mask_data)
+
+                    if mask_data_squeezed.max() > mask_data_squeezed.min():
+                        normalized_mask_data = ((mask_data_squeezed - mask_data_squeezed.min()) /
+                                                (mask_data_squeezed.max() - mask_data_squeezed.min()) * 255).astype(np.uint8)
+                    else:
+                        normalized_mask_data = np.zeros_like(mask_data_squeezed, dtype=np.uint8)
+
+                    mask_pil = Image.fromarray(normalized_mask_data.T) # Transpose if necessary based on data orientation
+                    if mask_pil.mode != 'L':
+                        mask_pil = mask_pil.convert('L')
+
+                    mask_pil = mask_pil.rotate(180, expand=False)
+                    mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
+
+                    # Yellow overlay
+                    overlay_color = (255, 255, 0) # Yellow
+                    alpha = 100 # Transparency
+                    overlay_image = Image.new('RGBA', original_image_pil.size, (0, 0, 0, 0))
+                    pixels = overlay_image.load()
+                    mask_pixels = mask_pil.load()
+
+                    for y in range(original_image_pil.size[1]):
+                        for x in range(original_image_pil.size[0]):
+                            # Apply overlay if the normalized mask pixel is not zero (i.e., it has some value)
+                            if mask_pixels[x, y] > 0:
+                                pixels[x, y] = overlay_color + (alpha,)
+
+                    # Composite the original image with the overlay
+                    combined_image_pil = Image.alpha_composite(original_image_pil.convert('RGBA'), overlay_image)
+                    qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
+                                  combined_image_pil.width, combined_image_pil.height,
+                                  QImage.Format_RGBA8888)
+                    pixmap = QPixmap.fromImage(qimg)
+                else:
+                    # if analyzed files are marked but not found, fall back to original image
+                    self.update_progress_text_signal.emit(f"[WARNING] Analyzed files ({v_file_path_in_output}, {rdf_file_path_in_output}) not found for '{filename}'. Displaying original input image.\n")
+                    raise FileNotFoundError("Analyzed files not found, displaying original.")
             else:
-                pixmap = QPixmap(full_path)
-                if pixmap.isNull():
-                    raise ValueError("[ERROR] QPixmap could not load the image.\n")
-                width, height = pixmap.width(), pixmap.height()
+                # Fallback to the original image display logic for non-analyzed files
+                if full_input_path.lower().endswith(".tif"):
+                    image = Image.open(full_input_path)
+                    image = ImageOps.exif_transpose(image)
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
 
-            # Fixed height for preview
+                    data = image.tobytes("raw", "RGB")
+                    width, height = image.size
+                    qimg = QImage(data, width, height, QImage.Format_RGB888)
+                    pixmap = QPixmap.fromImage(qimg)
+                else: # assuming .png
+                    pixmap = QPixmap(full_input_path)
+                    if pixmap.isNull():
+                        raise ValueError("[ERROR] QPixmap could not load the image.\n")
+
+            # fixed height for preview
             fixed_height = 375
+            width, height = pixmap.width(), pixmap.height()
             aspect_ratio = width / height
             new_height = fixed_height
             new_width = int(fixed_height * aspect_ratio)
 
-            # Resize the label and scale the pixmap accordingly
+            # resize the label and scale the pixmap accordingly
             self.imagePreviewLabel.setFixedSize(new_width, new_height)
             scaled_pixmap = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.imagePreviewLabel.setPixmap(scaled_pixmap)
@@ -586,9 +745,161 @@ class PyMarAiGuiApp(QDialog):
 
         except Exception as e:
             self.imagePreviewLabel.setText("Failed to load image.\n")
-            self.update_progress_text_signal.emit(f"[ERROR] Error loading image '{full_path}': {e}.\n")
-            # print(f"Error loading image '{full_path}': {e}.\n") # Original print, now use signal
+            self.update_progress_text_signal.emit(f"[ERROR] Error loading image '{full_input_path}': {e}.\n")
+            # print(f"Error loading image '{full_input_path}': {e}.\n") # Original print, now use signal
 
+    # display images in the re-training tab's preview
+    def showRetrainImageAtIndex(self, index):
+        if not self.retrainPreviewList:
+            self.retrainImagePreviewLabel.setText("No files selected")
+            return
+
+        filename_with_ext = self.cleanFilename(self.retrainPreviewList[index])
+        filename_base, _ = os.path.splitext(filename_with_ext)
+
+        v_filename = filename_base + ".v"
+        v_file_path = os.path.join(self.selectedRetrainInputDirectory, v_filename)
+        generated_mask_path = os.path.join(self.selectedRetrainInputDirectory, filename_base + "_cnn.v")
+
+        # use timestamp from .v file to tag cache
+        try:
+            v_file_mtime = os.path.getmtime(v_file_path)
+            v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
+        except Exception as e:
+            self.update_retrain_progress_text_signal.emit(f"[ERROR] Failed to get timestamp: {e}\n")
+            return
+
+        cache_dir = "/tmp/marai_cnn_masks"
+        os.makedirs(cache_dir, exist_ok=True)
+        cached_mask_name = f"{filename_base}_{v_file_timestamp}_cnn.v"
+        cached_mask_path = os.path.join(cache_dir, cached_mask_name)
+
+        self.retrainImageFilenameLabel.setText(filename_base)
+        self.retrainImagePreviewLabel.setText("Loading, processing with thrass, and overlaying...")
+
+        try:
+            if not os.path.exists(v_file_path):
+                raise FileNotFoundError(f".v file not found: {v_file_path}")
+
+            v_data_pmedio = pmedio.read(v_file_path)
+            original_v_data = v_data_pmedio.toarray()
+            original_v_data_squeezed = np.squeeze(original_v_data)
+
+            if original_v_data_squeezed.max() > original_v_data_squeezed.min():
+                normalized_original_data = ((original_v_data_squeezed - original_v_data_squeezed.min()) /
+                                            (
+                                                        original_v_data_squeezed.max() - original_v_data_squeezed.min()) * 255).astype(
+                    np.uint8)
+            else:
+                normalized_original_data = np.zeros_like(original_v_data_squeezed, dtype=np.uint8)
+
+            original_image_pil = Image.fromarray(normalized_original_data.T)
+            if original_image_pil.mode != 'RGB':
+                original_image_pil = original_image_pil.convert('RGB')
+
+            # reuse only if cache exists and is newer than source file
+            if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
+                self.update_retrain_progress_text_signal.emit(f"[INFO] Using cached mask: {cached_mask_path}\n")
+                mask_file_to_use = cached_mask_path
+            else:
+                self.update_retrain_progress_text_signal.emit(
+                    f"Running thrass for mask generation on {v_filename}...\n")
+
+                thrass_command = ["thrass", "-t", "cnnPrepare", "-b", v_filename]
+                env = os.environ.copy()
+                result = subprocess.run(
+                    thrass_command,
+                    capture_output=True,
+                    text=True,
+                    cwd=self.selectedRetrainInputDirectory,
+                    env=env
+                )
+
+                self.update_retrain_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
+                if result.stderr:
+                    self.update_retrain_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
+
+                if result.returncode != 0:
+                    raise RuntimeError(f"Thrass failed with exit code {result.returncode} for file: {v_file_path}")
+
+                # wait briefly for file to appear
+                wait_time = 0
+                max_wait = 5
+                while not os.path.exists(generated_mask_path) and wait_time < max_wait:
+                    time.sleep(0.5)
+                    wait_time += 0.5
+
+                if not os.path.exists(generated_mask_path):
+                    raise FileNotFoundError(
+                        f"Thrass mask file not found at: {generated_mask_path}\n"
+                        f"Check if RDF is missing or malformed for {v_file_path}."
+                    )
+
+                # copy to cache
+                shutil.copy2(str(generated_mask_path), str(cached_mask_path))
+                self.update_retrain_progress_text_signal.emit(f"[INFO] Cached mask: {cached_mask_path}\n")
+                mask_file_to_use = cached_mask_path
+
+                # cleanup thrass output in input directory
+                for fname in os.listdir(self.selectedRetrainInputDirectory):
+                    if fname.startswith(filename_base + "_cnn") and fname.endswith(".v"):
+                        try:
+                            os.remove(os.path.join(self.selectedRetrainInputDirectory, fname))
+                            self.update_retrain_progress_text_signal.emit(
+                                f"[INFO] Deleted Thrass output file: {fname}\n")
+                        except Exception as e:
+                            self.update_retrain_progress_text_signal.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
+
+            # read and normalize mask
+            mask_data_pmedio = pmedio.read(mask_file_to_use)
+            mask_data = mask_data_pmedio.toarray()
+            mask_data_squeezed = np.squeeze(mask_data)
+
+            if mask_data_squeezed.max() > mask_data_squeezed.min():
+                normalized_mask_data = ((mask_data_squeezed - mask_data_squeezed.min()) /
+                                        (mask_data_squeezed.max() - mask_data_squeezed.min()) * 255).astype(np.uint8)
+            else:
+                normalized_mask_data = np.zeros_like(mask_data_squeezed, dtype=np.uint8)
+
+            mask_pil = Image.fromarray(normalized_mask_data.T)
+            if mask_pil.mode != 'L':
+                mask_pil = mask_pil.convert('L')
+            mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
+
+            # yellow overlay
+            overlay_color = (255, 255, 0)
+            alpha = 100
+            red_overlay = Image.new('RGBA', original_image_pil.size, (0, 0, 0, 0))
+            pixels = red_overlay.load()
+            mask_pixels = mask_pil.load()
+
+            for y in range(original_image_pil.size[1]):
+                for x in range(original_image_pil.size[0]):
+                    if mask_pixels[x, y] > 0:
+                        pixels[x, y] = overlay_color + (alpha,)
+
+            combined_image_pil = Image.alpha_composite(original_image_pil.convert('RGBA'), red_overlay)
+            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
+                          combined_image_pil.width, combined_image_pil.height,
+                          QImage.Format_RGBA8888)
+
+            pixmap = QPixmap.fromImage(qimg)
+
+            fixed_height = 375
+            width, height = pixmap.width(), pixmap.height()
+            aspect_ratio = width / height
+            new_height = fixed_height
+            new_width = int(fixed_height * aspect_ratio)
+
+            self.retrainImagePreviewLabel.setFixedSize(new_width, new_height)
+            scaled_pixmap = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.retrainImagePreviewLabel.setPixmap(scaled_pixmap)
+            self.retrainImagePreviewLabel.setText("")
+
+        except Exception as e:
+            self.retrainImagePreviewLabel.setText(f"Error loading image: {e}")
+            self.update_retrain_progress_text_signal.emit(f"[ERROR] {e}\n")
+ 
     def showNextImage(self):
         if self.previewList:
             self.previewIndex = (self.previewIndex + 1) % len(self.previewList)
@@ -628,30 +939,32 @@ class PyMarAiGuiApp(QDialog):
 
     # --- Progress Bar Handling ---
     def setProgressBarText(self, text=None):
+        # This is specifically for the prediction tab's progress bar
         if text is None:
             self.progressBarLabel.setText("")
             self.progressBar.setValue(0)
-            self.progressBar.setMaximum(100) 
+            self.progressBar.setMaximum(100)
             self.progressBar.hide()
             self.progressBarLabel.hide()
         else:
             self.progressBarLabel.setText(text)
             self.progressBar.setMinimum(0)
-            self.progressBar.setMaximum(0)  
+            self.progressBar.setMaximum(0)
             self.progressBar.show()
             self.progressBarLabel.show()
 
     def updateProgressBarDetailed(self, current_count, total_count, filename):
+        # This is specifically for the prediction tab's progress bar
         if total_count > 0:
             percentage = int((current_count / total_count) * 100)
-            self.progressBar.setMaximum(total_count)  
-            self.progressBar.setValue(current_count)  
+            self.progressBar.setMaximum(total_count)
+            self.progressBar.setValue(current_count)
             self.progressBarLabel.setText(f"Processing: {current_count}/{total_count} ({percentage}%)")
             self.progressBar.show()
             self.progressBarLabel.show()
             self.update_progress_text_signal.emit(f"Completed {filename} ({current_count}/{total_count}).\n")
         else:
-            self.setProgressBarText("Starting prediction...") 
+            self.setProgressBarText("Starting prediction...")
 
     # switching between two states of elements
     # for prediction and user interaction mode
@@ -820,14 +1133,24 @@ class PyMarAiGuiApp(QDialog):
             "microscope_number": microscope_number
         }
 
-    # we use this function to show console-like messages during reconstruction
+    # show console-like messages during reconstruction
     def showProgressMessage(self, message):
+
         if not message.endswith('\n'):
             message += '\n'
         cursor = self.progressPlainTextEdit.textCursor()
         cursor.movePosition(cursor.End)
         cursor.insertText(message)
         self.progressPlainTextEdit.ensureCursorVisible()
+
+    # show progress messages for the re-training tab
+    def showRetrainProgressMessage(self, message):
+        if not message.endswith('\n'):
+            message += '\n'
+        cursor = self.retrainProgressPlainTextEdit.textCursor()
+        cursor.movePosition(cursor.End)
+        cursor.insertText(message)
+        self.retrainProgressPlainTextEdit.ensureCursorVisible()
 
     # call when processing thread started
     def processingStarted(self):
@@ -880,13 +1203,12 @@ class PyMarAiThread(QtCore.QThread):
                 params=self.params,
                 username=self.username,
                 password=self.password,
-                stdout_pipe_child=self.stdout_pipe_child, 
-                progress_pipe_child=self.progress_pipe_child, 
-                hostname=self.parent.config.get_default_remote_hostname()
+                stdout_pipe_child=self.stdout_pipe_child,
+                progress_pipe_child=self.progress_pipe_child,
             )
 
             self._process.start()
-            self._process.join() 
+            self._process.join()
 
             if self._process.exitcode != 0:
                 self.error_message.emit(f"[ERROR] Prediction process exited with error code: {self._process.exitcode}")
@@ -1011,7 +1333,7 @@ class PyMarAiThread(QtCore.QThread):
             # extract the pipe connections and the stop_event from the kwargs
             stdout_pipe_child = self._all_kwargs.pop('stdout_pipe_child')
             progress_pipe_child = self._all_kwargs.pop('progress_pipe_child')
-            stop_event = self._all_kwargs.pop('stop_event', None) 
+            stop_event = self._all_kwargs.pop('stop_event', None)
 
             original_stdout = sys.stdout
             original_stderr = sys.stderr
@@ -1023,8 +1345,8 @@ class PyMarAiThread(QtCore.QThread):
                 self._target(
                     progress_pipe_connection=progress_pipe_child,
                     stdout_pipe_connection=stdout_pipe_child,
-                    stop_event=stop_event, 
-                    **self._all_kwargs 
+                    stop_event=stop_event,
+                    **self._all_kwargs
                 )
             except Exception as e:
                 error_msg = f"Unhandled exception in prediction process: {e}\n"
