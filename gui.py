@@ -16,10 +16,10 @@ from multiprocessing import Pipe
 from config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QProgressBar, QWidget, QTabWidget,
-                             QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QToolButton)
+                             QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox)
 
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QIcon
+from PyQt5.QtGui import QPixmap, QImage
 from PIL import Image, ImageOps
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -96,7 +96,7 @@ class PyMarAiGuiApp(QDialog):
         main_layout.addWidget(self.tab_widget)
 
         self.setWindowTitle("Spheroids-DNN: Auto Inference Tool")
-        self.resize(800, 800)
+        self.resize(1200, 1000)
 
         self.initElements()
 
@@ -111,7 +111,7 @@ class PyMarAiGuiApp(QDialog):
 
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.inputFileListWidget.setFixedHeight(375)
+        self.inputFileListWidget.setFixedHeight(600)
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.inputFileListWidget.itemClicked.connect(self.showImageOnItemClick)
@@ -119,8 +119,8 @@ class PyMarAiGuiApp(QDialog):
 
         self.imagePreviewLabel = self.createLabel("Image Preview")
         self.imagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.imagePreviewLabel.setFixedHeight(375)
-        self.imagePreviewLabel.setMinimumWidth(375)
+        self.imagePreviewLabel.setFixedHeight(600)
+        self.imagePreviewLabel.setMinimumWidth(800)
         self.imagePreviewLabel.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
         self.imagePreviewLabel.setAlignment(Qt.AlignCenter)
 
@@ -241,15 +241,15 @@ class PyMarAiGuiApp(QDialog):
         self.retrainDeselectAllButton = self.createButton("Deselect All", self.deselectAllRetrainFiles)
         self.retrainInputFileListWidget = QListWidget()
         self.retrainInputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.retrainInputFileListWidget.setFixedHeight(375)
+        self.retrainInputFileListWidget.setFixedHeight(600)
         self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
         self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
 
         self.retrainImagePreviewLabel = self.createLabel("Image Preview")
         self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.retrainImagePreviewLabel.setFixedHeight(375)
-        self.retrainImagePreviewLabel.setMinimumWidth(375)
+        self.retrainImagePreviewLabel.setFixedHeight(600)
+        self.retrainImagePreviewLabel.setMinimumWidth(600)
         self.retrainImagePreviewLabel.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
         self.retrainImagePreviewLabel.setAlignment(Qt.AlignCenter)
 
@@ -578,6 +578,46 @@ class PyMarAiGuiApp(QDialog):
         self.retrainPreviewIndex = 0
         self.showRetrainImageAtIndex(self.retrainPreviewIndex)
 
+    def create_gradient_mask_overlay(self, original_image_pil, mask_pil, alpha=100, scale=255.0):
+        # blue for darker pixels, green for lighter pixels
+        start_color = (0, 0, 255)  # Blue
+        end_color = (0, 255, 0)  # Green
+
+        # convert original image to RGBA
+        original_image_rgba = original_image_pil.convert('RGBA')
+
+        # create an empty RGBA image for the overlay
+        overlay_image = Image.new('RGBA', original_image_rgba.size, (0, 0, 0, 0))
+
+        # get pixel data for both images
+        original_pixels = original_image_rgba.load()
+        mask_pixels = mask_pil.load()
+        overlay_pixels = overlay_image.load()
+
+        # get the size of the image
+        width, height = original_image_rgba.size
+
+        for y in range(height):
+            for x in range(width):
+                # apply overlay only where the mask is active
+                if mask_pixels[x, y] > 0:
+                    # get the average brightness of the original pixel
+                    r, g, b, _ = original_pixels[x, y]
+                    brightness = (r + g + b) // 3
+
+                    # normalize brightness to a 0-1 scale
+                    t = brightness / scale
+
+                    # linearly interpolate between the start and end colors
+                    r_grad = int(start_color[0] * (1 - t) + end_color[0] * t)
+                    g_grad = int(start_color[1] * (1 - t) + end_color[1] * t)
+                    b_grad = int(start_color[2] * (1 - t) + end_color[2] * t)
+
+                    overlay_pixels[x, y] = (r_grad, g_grad, b_grad, alpha)
+
+        # composite the original image with the new overlay
+        return Image.alpha_composite(original_image_rgba, overlay_image)
+
     def showImageAtIndex(self, index):
         if not self.previewList:
             self.imagePreviewLabel.setText("No files selected")
@@ -708,21 +748,10 @@ class PyMarAiGuiApp(QDialog):
                     mask_pil = mask_pil.rotate(180, expand=False)
                     mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
 
-                    # overlay
-                    overlay_color = (4, 95, 208)
-                    alpha = 100 # transparency
-                    overlay_image = Image.new('RGBA', original_image_pil.size, (0, 0, 0, 0))
-                    pixels = overlay_image.load()
-                    mask_pixels = mask_pil.load()
+                    # create the gradient overlay
+                    combined_image_pil = self.create_gradient_mask_overlay(original_image_pil, mask_pil, alpha=150, scale=125.0)
 
-                    for y in range(original_image_pil.size[1]):
-                        for x in range(original_image_pil.size[0]):
-                            # apply overlay if the normalized mask pixel is not zero
-                            if mask_pixels[x, y] > 0:
-                                pixels[x, y] = overlay_color + (alpha,)
-
-                    # composite the original image with the overlay
-                    combined_image_pil = Image.alpha_composite(original_image_pil.convert('RGBA'), overlay_image)
+                    # convert to QPixmap for display
                     qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
                                   combined_image_pil.width, combined_image_pil.height,
                                   QImage.Format_RGBA8888)
@@ -750,7 +779,7 @@ class PyMarAiGuiApp(QDialog):
                         raise ValueError("[ERROR] QPixmap could not load the image.\n")
 
             # fixed height for preview
-            fixed_height = 375
+            fixed_height = 600
             width, height = pixmap.width(), pixmap.height()
             aspect_ratio = width / height
             new_height = fixed_height
@@ -897,14 +926,16 @@ class PyMarAiGuiApp(QDialog):
                     if mask_pixels[x, y] > 0:
                         pixels[x, y] = overlay_color + (alpha,)
 
-            combined_image_pil = Image.alpha_composite(original_image_pil.convert('RGBA'), red_overlay)
-            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
-                          combined_image_pil.width, combined_image_pil.height,
-                          QImage.Format_RGBA8888)
+            # create the gradient overlay
+            combined_image_pil = self.create_gradient_mask_overlay(original_image_pil, mask_pil, alpha=150, scale=255.0)
 
+            # convert to QPixmap for display
+            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
+                            combined_image_pil.width, combined_image_pil.height,
+                            QImage.Format_RGBA8888)
             pixmap = QPixmap.fromImage(qimg)
 
-            fixed_height = 375
+            fixed_height = 600
             width, height = pixmap.width(), pixmap.height()
             aspect_ratio = width / height
             new_height = fixed_height
