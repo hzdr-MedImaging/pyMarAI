@@ -9,11 +9,15 @@ import threading
 import time
 import logging
 import shlex
+import re
 
 from abc import ABC
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
+logging.getLogger('paramiko').setLevel(logging.WARNING)
+logging.getLogger('paramiko.transport').setLevel(logging.WARNING)
 
 class UserCancelledError(Exception):
     # custom exception for user-initiated cancellation
@@ -39,7 +43,7 @@ class MarAiBase(ABC):
         self.progress_callback = None
         self.processed_files_count = 0
         self.total_expected_files = 0
-        self.reported_nnunet_files = set() 
+        self.reported_nnunet_files = set()
         self.reported_rdf_files = set()
 
         # stop event from the GUI's multiprocessing.Process
@@ -58,8 +62,6 @@ class MarAiBase(ABC):
         self.localTempDir = tempfile.TemporaryDirectory(prefix="marai-")
         self.tempId = self.localTempDir.name.split('-')[1]
 
-        # shared state for monitoring thread
-        self.stop_monitoring_event = threading.Event()
         # Event to signal when nnUNet process itself has finished
         self.nnunet_process_finished_event = threading.Event()
 
@@ -107,7 +109,9 @@ class MarAiBase(ABC):
                 return "-device cpu"
         return ""
 
-    def runCommand(self, cmd, stream_output=False):
+    # Modified runCommand to accept progress_pattern and progress_callback
+    def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
+                   progress_pattern=None, original_input_files_map=None):
         raise NotImplementedError
 
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
@@ -151,116 +155,8 @@ class MarAiBase(ABC):
     def _check_file_existence(self, file_path):
         raise NotImplementedError
 
-    # monitors the nnUNet output directory for new files and triggers progress updates
-    def _monitor_nnunet_output(self, nnunet_output_dir, original_input_files_map, is_remote, stop_event, nnunet_process_finished_event):
-        logger.info("Monitoring thread started.")
-
-        if self.total_expected_files == 0 and original_input_files_map:
-            self.total_expected_files = len(original_input_files_map)
-
-        nnunet_completed_count = 0
-
-        while True:
-            if stop_event.is_set():
-                logger.info("Monitoring thread: Stop event received. Exiting.")
-                break
-
-            try:
-                current_output_files_list = self._list_directory(nnunet_output_dir)
-            except (FileNotFoundError, paramiko.SFTPError) as e:
-                logger.warning(f"Monitoring: Directory {nnunet_output_dir} not found or SFTP error: {e}. Retrying...")
-                time.sleep(5)
-                continue
-            except Exception as e:
-                logger.error(f"Monitoring: Error listing directory {nnunet_output_dir}: {e}")
-                # If nnUNet process has finished, and we still can't list, then something's wrong.
-                # Otherwise, keep trying.
-                if nnunet_process_finished_event.is_set():
-                    logger.error("Monitoring thread: nnUNet process finished but directory listing failed. Exiting monitor.")
-                    break
-                time.sleep(5)
-                continue
-
-            newly_nnunet_completed_files = []
-            # Only consider files that look like nnUNet output V files
-            nnunet_v_files_in_output = [f for f in current_output_files_list if f.endswith(".v") and "_0000.v" not in f]
-
-            for file_name in nnunet_v_files_in_output:
-                file_prefix_from_output = os.path.splitext(file_name)[0]
-
-                if file_prefix_from_output in original_input_files_map and \
-                   file_prefix_from_output not in self.reported_nnunet_files:
-
-                    nnunet_v_path_in_temp = os.path.join(nnunet_output_dir, file_name) # Use file_name directly for actual path
-
-                    if self._check_file_existence(nnunet_v_path_in_temp):
-                        # Add a simple size check to ensure the file isn't empty/corrupt
-                        try:
-                            file_size = self._get_file_size(nnunet_v_path_in_temp, is_remote)
-                            if file_size > 0: # Check if file has some content
-                                newly_nnunet_completed_files.append(file_prefix_from_output)
-                            else:
-                                logger.debug(f"File {nnunet_v_path_in_temp} exists but is empty. Waiting for content.")
-                        except Exception as e:
-                            logger.warning(f"Could not check size of {nnunet_v_path_in_temp}: {e}. Retrying.")
-
-            newly_nnunet_completed_files.sort()
-
-            for file_prefix in newly_nnunet_completed_files:
-                original_input_filepath = original_input_files_map[file_prefix]
-                nnunet_completed_count += 1
-                self.reported_nnunet_files.add(file_prefix)
-
-                if self.progress_callback:
-                    self.progress_callback(
-                        nnunet_completed_count,
-                        self.total_expected_files,
-                        os.path.basename(original_input_filepath),
-                        "nnunet_predicting" # Indicate this is DURING nnUNet prediction
-                    )
-                logger.info(
-                    f"Monitor reported nnUNet progress for {file_prefix}: {nnunet_completed_count}/{self.total_expected_files}")
-
-            # If nnUNet process itself has finished AND all files expected have been reported for nnUNet, then break.
-            # This handles cases where monitoring might miss a file if the process finishes too quickly.
-            if nnunet_process_finished_event.is_set() and nnunet_completed_count == self.total_expected_files:
-                logger.info("Monitoring thread: All expected nnUNet files reported and process finished. Exiting.")
-                break
-            # If nnUNet process finished, and we still have un-reported files, check one last time before exiting.
-            elif nnunet_process_finished_event.is_set() and nnunet_completed_count < self.total_expected_files:
-                logger.warning(f"Monitoring thread: nnUNet process finished, but only {nnunet_completed_count}/{self.total_expected_files} nnUNet files reported. Doing one last check.")
-                time.sleep(5) # Give it a final moment
-                # Re-list and report any stragglers
-                current_output_files_list = self._list_directory(nnunet_output_dir)
-                nnunet_v_files_in_output = [f for f in current_output_files_list if f.endswith(".v") and "_0000.v" not in f]
-                for file_name in nnunet_v_files_in_output:
-                    file_prefix_from_output = os.path.splitext(file_name)[0]
-                    if file_prefix_from_output in original_input_files_map and file_prefix_from_output not in self.reported_nnunet_files:
-                        nnunet_v_path_in_temp = os.path.join(nnunet_output_dir, file_name)
-                        if self._check_file_existence(nnunet_v_path_in_temp):
-                            try:
-                                file_size = self._get_file_size(nnunet_v_path_in_temp, is_remote)
-                                if file_size > 0:
-                                    original_input_filepath = original_input_files_map[file_prefix_from_output]
-                                    nnunet_completed_count += 1
-                                    self.reported_nnunet_files.add(file_prefix_from_output)
-                                    if self.progress_callback:
-                                        self.progress_callback(
-                                            nnunet_completed_count,
-                                            self.total_expected_files,
-                                            os.path.basename(original_input_filepath),
-                                            "nnunet_predicting"
-                                        )
-                                    logger.info(f"Monitor (final check) reported nnUNet progress for {file_prefix_from_output}: {nnunet_completed_count}/{self.total_expected_files}")
-                            except Exception as e:
-                                logger.warning(f"Could not check size in final check for {nnunet_v_path_in_temp}: {e}")
-                logger.info("Monitoring thread: Final check complete. Exiting.")
-                break
-
-
-            time.sleep(5)
-
-        logger.info("Monitoring thread finished.")
+    # The _monitor_nnunet_output method has been removed.
+    # Progress for nnUNet is now directly reported from runCommand by parsing its stdout.
 
     def _get_file_size(self, file_path, is_remote):
         if is_remote:
@@ -273,7 +169,8 @@ class MarAiLocal(MarAiBase):
         super().__init__(cfg_path, stop_event=stop_event)
 
     # run a local shell command
-    def runCommand(self, cmd, stream_output=False):
+    def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
+                   progress_pattern=None, original_input_files_map=None):
         if isinstance(cmd, list):
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         else:
@@ -283,6 +180,25 @@ class MarAiLocal(MarAiBase):
         if stream_output:
             for line in process.stdout:
                 print(line, end='')
+                if progress_pattern and self.progress_callback and original_input_files_map:
+                    match = re.search(progress_pattern, line)
+                    if match:
+                        filename = match.group(1)
+                        file_prefix_from_output = os.path.splitext(filename)[0]
+
+                        if file_prefix_from_output in original_input_files_map and \
+                           file_prefix_from_output not in self.reported_nnunet_files:
+                            self.reported_nnunet_files.add(file_prefix_from_output)
+                            current_nnunet_count = len(self.reported_nnunet_files)
+                            original_input_filepath = original_input_files_map[file_prefix_from_output]
+
+                            self.progress_callback(
+                                current_nnunet_count,
+                                self.total_expected_files,
+                                os.path.basename(original_input_filepath),
+                                "Running prediction"
+                            )
+                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stdout: {current_nnunet_count}/{self.total_expected_files}")
         else:
             output, _ = process.communicate()
             print(output)
@@ -291,20 +207,23 @@ class MarAiLocal(MarAiBase):
         if exit_status != 0:
             raise RuntimeError(f"[ERROR] Command failed with exit status {exit_status}: {cmd}.\n")
 
+        if process_event_on_completion:
+            process_event_on_completion.set()  # signal that this command has completed
+
+
     def _check_file_existence(self, file_path):
         return os.path.exists(file_path)
 
     def _list_directory(self, directory_path):
         return os.listdir(directory_path)
 
-    def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None, stop_event=None):
+    def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
         self.progress_callback = progress_callback
         self.total_expected_files = len(input_files)
         self.processed_files_count = 0
         self.reported_nnunet_files.clear()
         self.reported_rdf_files.clear()
-        self.stop_monitoring_event.clear()
-        self.nnunet_process_finished_event.clear() # Reset for each call
+        self.nnunet_process_finished_event.clear()  # Reset for each call
 
         if self.stop_event and self.stop_event.is_set():
             logger.info("[INFO] Local prediction aborted by external signal before start.")
@@ -318,6 +237,8 @@ class MarAiLocal(MarAiBase):
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
         logger.info(f"[INFO] Preparing {self.total_expected_files} files for nnUNet...")
+        # Add a counter for the "Preparing files" stage
+        prepared_files_count = 0
         for input_file in input_files:
             if self.stop_event and self.stop_event.is_set():
                 logger.info("[INFO] Local prediction aborted by external signal during preprocessing.")
@@ -330,21 +251,31 @@ class MarAiLocal(MarAiBase):
             v_path = os.path.join(self.localTempDir.name, f"{file_prefix}.v")
             self.runCommand([self.mic2ecat_path, "-j", str(microscope_number), temp_input_path_for_mic2ecat])
             shutil.copy(v_path, os.path.join(nnunet_input_dir, self._get_nnunet_input_name_for_temp_copy(file_prefix)))
+
+            # Report progress for "Preparing files for prediction"
+            prepared_files_count += 1
+            if self.progress_callback:
+                self.progress_callback(
+                    prepared_files_count,
+                    self.total_expected_files,
+                    os.path.basename(input_file),
+                    "Preparing files for prediction"  # New stage indicator
+                )
+
         logger.info("[INFO] Finished uploading and preprocessing.")
 
         nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
         nnunet_cmd += f" -device cpu"
         logger.info(f"[INFO] Running nnUNet command: {nnunet_cmd}")
 
-        # start monitoring thread BEFORE nnunet command is issued
-        monitor_thread = threading.Thread(target=self._monitor_nnunet_output,
-                                          args=(nnunet_output_dir, original_input_files_map, False,
-                                                self.stop_monitoring_event, self.nnunet_process_finished_event))
-        monitor_thread.daemon = True
-        monitor_thread.start()
+        # The progress pattern for nnUNet already captures the filename.
+        # The stage indicator for nnUNet is already set in runCommand.
+        nnunet_progress_pattern = r"done with (\S+)"
 
+        # nnUNet execution now directly reports progress via runCommand's streaming
         nnunet_execution_thread = threading.Thread(target=self.runCommand,
-                                                   args=(nnunet_cmd, True, self.nnunet_process_finished_event))
+                                                   args=(nnunet_cmd, True, self.nnunet_process_finished_event,
+                                                         nnunet_progress_pattern, original_input_files_map))
         nnunet_execution_thread.daemon = True
         nnunet_execution_thread.start()
 
@@ -353,14 +284,9 @@ class MarAiLocal(MarAiBase):
             nnunet_execution_thread.join()
         except Exception as e:
             logger.error(f"[ERROR] An error occurred in the nnUNet execution thread: {e}")
-            self.stop_monitoring_event.set()
-            monitor_thread.join(timeout=10)
             raise
 
         logger.info("[INFO] nnUNet prediction command completed (execution thread finished).")
-
-        self.stop_monitoring_event.set()
-        monitor_thread.join()
 
         # post-processing (roi2rdf and copying to final output_dir)
         rdf_processed_count = 0
@@ -399,9 +325,10 @@ class MarAiLocal(MarAiBase):
                         rdf_processed_count,
                         self.total_expected_files,
                         os.path.basename(input_file),
-                        "rdf_finished"
+                        "Making ROI mask files"  # Changed label here to be more descriptive
                     )
-                logger.info(f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
+                logger.info(
+                    f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
 
         logger.info("[INFO] All files post-processed and progress confirmed.")
 
@@ -489,7 +416,8 @@ class MarAiRemote(MarAiBase):
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     # run command remotely and stream output (now can signal completion)
-    def runCommand(self, cmd, stream_output=False, process_event_on_completion=None):
+    def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
+                   progress_pattern=None, original_input_files_map=None):
         if not self.connected:
             raise RuntimeError("[ERROR] Not connected to remote host.")
 
@@ -504,8 +432,45 @@ class MarAiRemote(MarAiBase):
         if stream_output:
             for line in iter(stdout.readline, ""):
                 print(line, end='')
+                if progress_pattern and self.progress_callback and original_input_files_map:
+                    match = re.search(progress_pattern, line)
+                    if match:
+                        filename = match.group(1) # Assuming group 1 captures the filename/prefix
+                        file_prefix_from_output = os.path.splitext(filename)[0]
+
+                        if file_prefix_from_output in original_input_files_map and \
+                           file_prefix_from_output not in self.reported_nnunet_files:
+                            self.reported_nnunet_files.add(file_prefix_from_output)
+                            current_nnunet_count = len(self.reported_nnunet_files)
+                            original_input_filepath = original_input_files_map[file_prefix_from_output]
+
+                            self.progress_callback(
+                                current_nnunet_count,
+                                self.total_expected_files,
+                                os.path.basename(original_input_filepath),
+                                "Running prediction"
+                            )
+                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stdout: {current_nnunet_count}/{self.total_expected_files}")
+            # Also process stderr for potential progress messages, though less common for "Done"
             for line in iter(stderr.readline, ""):
                 print(line, end='')
+                if progress_pattern and self.progress_callback and original_input_files_map:
+                    match = re.search(progress_pattern, line)
+                    if match:
+                        filename = match.group(1)
+                        file_prefix_from_output = os.path.splitext(filename)[0]
+                        if file_prefix_from_output in original_input_files_map and \
+                           file_prefix_from_output not in self.reported_nnunet_files:
+                            self.reported_nnunet_files.add(file_prefix_from_output)
+                            current_nnunet_count = len(self.reported_nnunet_files)
+                            original_input_filepath = original_input_files_map[file_prefix_from_output]
+                            self.progress_callback(
+                                current_nnunet_count,
+                                self.total_expected_files,
+                                os.path.basename(original_input_filepath),
+                                "nnunet_predicting"
+                            )
+                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stderr: {current_nnunet_count}/{self.total_expected_files}")
         else:
             output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
             print(output)
@@ -541,7 +506,6 @@ class MarAiRemote(MarAiBase):
         self.processed_files_count = 0
         self.reported_nnunet_files.clear()
         self.reported_rdf_files.clear()
-        self.stop_monitoring_event.clear()
         self.nnunet_process_finished_event.clear()
         remote_temp = None
 
@@ -559,6 +523,8 @@ class MarAiRemote(MarAiBase):
             original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
             logger.info(f"[INFO] Preparing {self.total_expected_files} files for nnUNet...")
+            # Add a counter for the "Preparing files" stage
+            prepared_files_count = 0
             for i, input_file in enumerate(input_files):
                 if self.stop_event and self.stop_event.is_set():
                     logger.info("[INFO] Remote prediction aborted by external signal during upload.")
@@ -574,6 +540,17 @@ class MarAiRemote(MarAiBase):
                 self.runCommand(
                     ["cp", v_path, f"{nnunet_input}/{self._get_nnunet_input_name_for_temp_copy(file_prefix)}"],
                     stream_output=True)
+
+                # Report progress for "Preparing files for prediction"
+                prepared_files_count += 1
+                if self.progress_callback:
+                    self.progress_callback(
+                        prepared_files_count,
+                        self.total_expected_files,
+                        os.path.basename(input_file),
+                        "Preparing files for prediction"  # New stage indicator
+                    )
+
             logger.info("[INFO] Finished uploading and preprocessing.")
 
             nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input, nnunet_output)
@@ -581,16 +558,12 @@ class MarAiRemote(MarAiBase):
             nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
             logger.info(f"[INFO] Running nnUNet command: {nnunet_cmd_full}")
 
-            # start monitoring thread BEFORE nnunet command is issued
-            monitor_thread = threading.Thread(target=self._monitor_nnunet_output,
-                                              args=(nnunet_output, original_input_files_map, True,
-                                                    self.stop_monitoring_event, self.nnunet_process_finished_event))
-            monitor_thread.daemon = True
-            monitor_thread.start()
+            nnunet_progress_pattern = r"done with (\S+)"
 
-            # execute nnUNet in a separate thread
+            # nnUNet execution now directly reports progress via runCommand's streaming
             nnunet_execution_thread = threading.Thread(target=self.runCommand,
-                                                       args=(nnunet_cmd_full, True, self.nnunet_process_finished_event))
+                                                       args=(nnunet_cmd_full, True, self.nnunet_process_finished_event,
+                                                             nnunet_progress_pattern, original_input_files_map))
             nnunet_execution_thread.daemon = True
             nnunet_execution_thread.start()
 
@@ -599,17 +572,11 @@ class MarAiRemote(MarAiBase):
                 nnunet_execution_thread.join()
             except Exception as e:
                 logger.error(f"[ERROR] An error occurred in the remote nnUNet execution thread: {e}")
-                self.stop_monitoring_event.set()
-                monitor_thread.join(timeout=10)
                 raise
 
             logger.info("[INFO] nnUNet prediction command completed (execution thread finished).")
 
-            # after nnUNet thread finishes, wait for monitoring thread to catch up and finish its last checks
-            self.stop_monitoring_event.set() # Signal monitor to stop
-            monitor_thread.join() # Wait for monitor to properly finish
-
-            # download results and roi2Rdf
+            # post-processing (roi2rdf and copying to final output_dir)
             rdf_processed_count = 0
             for input_file in input_files:
                 if self.stop_event and self.stop_event.is_set():
@@ -630,7 +597,7 @@ class MarAiRemote(MarAiBase):
                 local_v_path = os.path.join(output_dir, f"{file_prefix}.v")
                 local_rdf_path = os.path.join(output_dir, self._get_roi2rdf_output_name_in_temp(file_prefix))
 
-                remote_v_path = f"{remote_temp}/{file_prefix}.v" # This is the mic2ecat output .v file, not nnunet
+                remote_v_path = f"{remote_temp}/{file_prefix}.v"  # This is the mic2ecat output .v file, not nnunet
                 if self._check_file_existence(remote_v_path) and not os.path.exists(local_v_path):
                     self.sftp.get(remote_v_path, local_v_path)
 
@@ -645,9 +612,10 @@ class MarAiRemote(MarAiBase):
                             rdf_processed_count,
                             self.total_expected_files,
                             os.path.basename(input_file),
-                            "rdf_finished"
+                            "Making ROI mask files"
                         )
-                    logger.info(f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
+                    logger.info(
+                        f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
 
             logger.info("[INFO] All files post-processed, downloaded, and progress confirmed.")
 
@@ -666,7 +634,7 @@ class MarAiRemote(MarAiBase):
         finally:
             self.disconnect()
             logger.info("[INFO] Disconnected from remote host.")
-            if remote_temp and self.connected: # Check self.connected as disconnect might fail
+            if remote_temp and self.connected:  # Check self.connected as disconnect might fail
                 try:
                     self.runCommand(["rm", "-rf", remote_temp], stream_output=True)
                     logger.info("[INFO] Remote cleanup complete in finally block.")
