@@ -25,7 +25,7 @@ def gui_entry_point(params: dict, username: str, password: str,
                     progress_pipe_connection: Connection, stdout_pipe_connection: Connection,
                     stop_event: Event = None) -> None:
 
-    logger.info("predict.gui_entry_point received call from GUI process.")
+    logger.debug("predict.gui_entry_point received call from GUI process.")
 
     root_logger_child_process = logging.getLogger()
     for handler in root_logger_child_process.handlers[:]:
@@ -50,7 +50,12 @@ def gui_entry_point(params: dict, username: str, password: str,
     root_logger_child_process.addHandler(pipe_handler)
     root_logger_child_process.setLevel(logging.DEBUG)
 
-    progress_callback = make_progress_callback(logger.info)
+    def progress_callback_for_gui(current_count: int, total_count: int, filename: str, stage_indicator: str):
+        if progress_pipe_connection and not progress_pipe_connection.closed:
+            try:
+                progress_pipe_connection.send((current_count, total_count, filename, stage_indicator))
+            except Exception as e:
+                logger.error(f"[ERROR] Error sending progress data to pipe: {e}")
 
     try:
         input_files = params.get('input_files', [])
@@ -70,7 +75,7 @@ def gui_entry_point(params: dict, username: str, password: str,
             ssh_username=username,
             ssh_password=password,
             stop_event=stop_event,
-            progress_callback=progress_callback
+            progress_callback=progress_callback_for_gui
         )
     except Exception as e:
         logger.error(f"An unhandled exception occurred in predict.gui_entry_point: {e}", exc_info=True)
