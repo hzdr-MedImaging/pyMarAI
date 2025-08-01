@@ -6,9 +6,11 @@ import logging
 import login
 import predict
 import shutil
-import numpy as np
 import pmedio
 import time
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe
@@ -16,36 +18,19 @@ from multiprocessing import Pipe
 from config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout,
-                             QLabel, QProgressBar, QWidget, QTabWidget,
-                             QPushButton, QSizePolicy, QPlainTextEdit, QLineEdit, QFileDialog, QListWidget,
-                             QListWidgetItem, QMessageBox)
+                             QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit,
+                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog)
 
+from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage
 from PIL import Image, ImageOps
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-class StdIORedirector:
-    def __init__(self, pipe_connection):
-        self.pipe = pipe_connection
-
-    def write(self, string):
-        if string and self.pipe and not self.pipe.closed:
-            try:
-                self.pipe.send(string)
-            except Exception as e:
-                logger.error(f"[ERROR] Error writing to pipe in StdIORedirector: {e}")
-
-    def flush(self):
-        # no-op for pipes, as send is usually immediate
-        pass
-
-
+# Main GUI application class for Spheroids-DNN
 class PyMarAiGuiApp(QDialog):
+
     # signals to update GUI from worker threads/processes
     update_progress_text_signal = pyqtSignal(str)
     update_progress_bar_signal = pyqtSignal(int, int, str, str)
@@ -53,7 +38,6 @@ class PyMarAiGuiApp(QDialog):
     processing_started_signal = pyqtSignal()
     update_retrain_progress_text_signal = pyqtSignal(str)
 
-    # we use constructor to create the GUI layout
     def __init__(self, config: AppConfig, parent=None):
         super(PyMarAiGuiApp, self).__init__(parent)
 
@@ -67,8 +51,6 @@ class PyMarAiGuiApp(QDialog):
         self.lastOutputDirectory = self.settings.value("lastOutputDir", os.getcwd())
         self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", os.getcwd())
         self.lastRetrainOutputDirectory = self.settings.value("lastRetrainOutputDir", os.getcwd())
-        self.currentImage = None
-        self.currentImageIsPillow = False
 
         self.previewList = []
         self.retrainPreviewList = []
@@ -80,16 +62,17 @@ class PyMarAiGuiApp(QDialog):
         self.processingRunning = False
         self.outputBasenames = set()
 
-        # New instance variables to store original images
         self.originalPredictionImage = None
         self.originalRetrainImage = None
 
+        # connect signals to slots
         self.update_progress_text_signal.connect(self.showProgressMessage)
         self.update_progress_bar_signal.connect(self.updateProgressBarDetailed)
         self.processing_finished_signal.connect(self.processingFinished)
         self.processing_started_signal.connect(self.processingStarted)
         self.update_retrain_progress_text_signal.connect(self.showRetrainProgressMessage)
 
+        # setup tab widget and tabs
         self.tab_widget = QTabWidget()
         self.prediction_tab = QWidget()
         self.retrain_tab = QWidget()
@@ -100,57 +83,23 @@ class PyMarAiGuiApp(QDialog):
         self.setupPredictionTab()
         self.setupRetrainTab()
 
+        # main layout
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.tab_widget)
 
         self.setWindowTitle("Spheroids-DNN: Auto Inference Tool")
-        self.resize(1200, 1000)
+        self.resize(1600, 1200)
 
         self.initElements()
 
+    # sets up the layout and widgets for the prediction tab
     def setupPredictionTab(self):
-        # setup for the prediction tab
+        # --- Input File Section ---
         inputFileLabel = self.createLabel("Input folder:")
-        inputFileLabel.setStyleSheet("color: #333; font-weight: bold;")
         self.inputDirButton = self.createButton("Browse", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
-
-        self.inputFileListWidget = QListWidget()
-        self.inputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.inputFileListWidget.setFixedHeight(600)
-        self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
-        self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
-
-        self.imagePreviewLabel = self.createLabel("Image Preview")
-        self.imagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.imagePreviewLabel.setFixedHeight(600)
-        self.imagePreviewLabel.setMinimumWidth(800)
-        self.imagePreviewLabel.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
-        self.imagePreviewLabel.setAlignment(Qt.AlignCenter)
-
-        self.imageFilenameLabel = self.createLabel("No file selected")
-        self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
-        self.imageFilenameLabel.setStyleSheet("color: #333; font-weight: bold;")
-
-        self.applyMaskButton = self.createButton("Apply Mask", self.applyPredictionMask)
-        self.removeMaskButton = self.createButton("Remove Mask", self.removePredictionMask)
-
-        maskLayout = QHBoxLayout()
-        maskLayout.addWidget(self.applyMaskButton)
-        maskLayout.addWidget(self.removeMaskButton)
-        maskLayout.addStretch()
-
-        self.prevButton = self.createButton("Previous", self.showPreviousImage)
-        self.nextButton = self.createButton("Next", self.showNextImage)
-
-        navLayout = QHBoxLayout()
-        navLayout.addStretch()
-        navLayout.addWidget(self.imageFilenameLabel)
-        navLayout.addWidget(self.prevButton)
-        navLayout.addWidget(self.nextButton)
 
         inputFilePathButtonsLayout = QHBoxLayout()
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
@@ -159,22 +108,82 @@ class PyMarAiGuiApp(QDialog):
         inputFilePathButtonsLayout.addWidget(self.openRoverButton)
         inputFilePathButtonsLayout.addStretch()
 
-        inputFileShowLayout = QHBoxLayout()
-        inputFileShowLayout.addWidget(self.inputFileListWidget)
-        inputFileShowLayout.addWidget(self.imagePreviewLabel)
+        self.inputFileListWidget = QListWidget()
+        self.inputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.inputFileListWidget.setFixedHeight(600)
+        self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
 
+        inputFileSectionWidget = QWidget()
+        inputFileSectionLayout = QVBoxLayout(inputFileSectionWidget)
+        inputFileSectionLayout.addWidget(inputFileLabel)
+        inputFileSectionLayout.addWidget(self.inputFileListWidget)
+        inputFileSectionLayout.addLayout(inputFilePathButtonsLayout)
+
+        # --- Image Preview Section ---
+        self.imagePreviewLabel = self.createLabel("Image Preview")
+        self.imagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.imagePreviewLabel.setFixedHeight(600)
+        self.imagePreviewLabel.setMinimumWidth(800)
+        self.imagePreviewLabel.setAlignment(Qt.AlignCenter)
+        self.imagePreviewLabel.setStyleSheet("""
+            border: 1px solid #cccccc;
+            background-color: #fafafa;
+            border-radius: 6px;
+        """)
+
+        self.imageFilenameLabel = self.createLabel("No file selected")
+        self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
+
+        self.prevButton = self.createButton("Previous", self.showPreviousImage)
+        self.nextButton = self.createButton("Next", self.showNextImage)
+
+        imagePreviewContainerWidget = QWidget()
+        imagePreviewContainerLayout = QVBoxLayout(imagePreviewContainerWidget)
+
+        imagePreviewContainerLayout.addWidget(self.imageFilenameLabel, alignment=Qt.AlignCenter)
+        imagePreviewContainerLayout.addWidget(self.imagePreviewLabel)
+
+        prevNextButtonsHLayout = QHBoxLayout()
+        prevNextButtonsHLayout.addStretch()
+        prevNextButtonsHLayout.addWidget(self.prevButton)
+        prevNextButtonsHLayout.addWidget(self.nextButton)
+        prevNextButtonsHLayout.addStretch()
+        imagePreviewContainerLayout.addLayout(prevNextButtonsHLayout)
+
+        # --- Mask Buttons and Mask Display Options ---
+        self.applyMaskButton = self.createButton("Apply Mask", self.applyPredictionMask)
+        self.removeMaskButton = self.createButton("Remove Mask", self.removePredictionMask)
+
+        maskButtonsHLayout = QHBoxLayout()
+        maskButtonsHLayout.addWidget(self.applyMaskButton)
+        maskButtonsHLayout.addWidget(self.removeMaskButton)
+        maskButtonsHLayout.addStretch()
+
+        mask_options_group_box = self.setupMaskDisplayOptions("prediction")
+
+        maskControlsVWidget = QWidget()
+        maskControlsVLayout = QVBoxLayout(maskControlsVWidget)
+        maskControlsVLayout.addSpacing(21)
+        maskControlsVLayout.addLayout(maskButtonsHLayout)
+        maskControlsVLayout.addWidget(mask_options_group_box)
+
+        # --- Output File Section ---
         self.outputFileLabel = self.createLabel("Output Folder:")
-        self.outputFileLabel.setStyleSheet("color: #333; font-weight: bold;")
         self.outputFilePathTextEdit = self.createTextEdit()
-
         self.outputFilePathSelectButton = self.createButton("Browse", self.outputDirSelect)
+
         outputFilePathLayout = QHBoxLayout()
         outputFilePathLayout.addWidget(self.outputFileLabel)
         outputFilePathLayout.addWidget(self.outputFilePathTextEdit)
         outputFilePathLayout.addWidget(self.outputFilePathSelectButton)
 
+        outputFilePathWidget = QWidget()
+        outputFilePathWidget.setLayout(outputFilePathLayout)
+
+        # --- Microscope Selection ---
         self.microscopeLabel = self.createLabel("Microscope:")
-        self.microscopeLabel.setStyleSheet("color: #333; font-weight: bold;")
         self.microscopeComboBox = self.createComboBox()
         self.microscopeComboBox.addItems(self.microscopes)
         index = self.microscopeComboBox.findText(self.defaultMicroscopeType)
@@ -186,105 +195,70 @@ class PyMarAiGuiApp(QDialog):
         microscopeLayout.setSpacing(23)
         microscopeLayout.addWidget(self.microscopeComboBox)
 
-        predictionButtonLayout = QHBoxLayout()
+        microscopeWidget = QWidget()
+        microscopeWidget.setLayout(microscopeLayout)
+
+        # --- Combine Output Folder + Microscope Selection ---
+        outputAndMicroscopeLayout = QHBoxLayout()
+        outputAndMicroscopeLayout.addWidget(outputFilePathWidget, stretch=3)
+        outputAndMicroscopeLayout.addWidget(microscopeWidget, stretch=1)
+
+        # --- Prediction Button, Progress Bar, and Progress Label (Grouped) ---
         self.predictionButton = self.createButton("Run Prediction", self.predictionButtonPressed)
-        predictionButtonLayout.addWidget(self.predictionButton)
-        predictionButtonLayout.addStretch()
+        self.predictionButton.setFixedSize(140, 36)
+
         self.progressBarLabel = QLabel()
         self.progressBarLabel.hide()
         self.progressBar = QProgressBar()
-        self.progressBar.setStyleSheet("""
-        QProgressBar {
-            background-color: white;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            text-align: center;
-        }
-
-        QProgressBar::chunk {
-            background-color: #0078d7;
-            border-radius: 4px;
-        }
-        """)
         self.progressBar.setFixedHeight(8)
         self.progressBar.setFixedWidth(300)
         self.progressBar.setMinimum(0)
         self.progressBar.setMaximum(100)
         self.progressBar.hide()
-        predictionButtonLayout.addWidget(self.progressBarLabel)
-        predictionButtonLayout.addWidget(self.progressBar)
 
+        predictionRunWidget = QWidget()
+        predictionRunLayout = QHBoxLayout(predictionRunWidget)
+        predictionRunLayout.addWidget(self.predictionButton, alignment=Qt.AlignCenter)
+        progressBarHLayout = QHBoxLayout()
+        predictionRunLayout.addStretch()
+        progressBarHLayout.addWidget(self.progressBarLabel)
+        progressBarHLayout.addWidget(self.progressBar)
+        predictionRunLayout.addLayout(progressBarHLayout)
+        predictionRunLayout.addStretch()
+
+        # --- Progress Output Label and Text Area ---
         progressLabel = self.createLabel("Progress Output:")
         self.progressPlainTextEdit = self.createPlainTextEdit()
 
-        prediction_tab_layout = QGridLayout(self.prediction_tab)  # Apply layout to the tab widget
-        prediction_tab_layout.setColumnMinimumWidth(0, 75)
-        prediction_tab_layout.setColumnStretch(1, 1)
-        prediction_tab_layout.setColumnStretch(3, 1)
+        predictionLogWidget = QWidget()
+        predictionLogLayout = QVBoxLayout(predictionLogWidget)
+        predictionLogLayout.addWidget(progressLabel)
+        predictionLogLayout.addWidget(self.progressPlainTextEdit)
 
-        row = 0
-        prediction_tab_layout.addWidget(inputFileLabel, row, 0)
+        # --- Main Prediction Tab Layout ---
+        prediction_tab_layout = QGridLayout(self.prediction_tab)
 
-        row += 1
-        prediction_tab_layout.addLayout(inputFileShowLayout, row, 0, 1, 4)
+        current_row = 0
+        prediction_tab_layout.addWidget(inputFileSectionWidget, current_row, 0, 1, 1)
+        prediction_tab_layout.addWidget(imagePreviewContainerWidget, current_row, 1, 1, 2)
+        prediction_tab_layout.addWidget(maskControlsVWidget, current_row, 3, 1, 1, Qt.AlignRight | Qt.AlignTop)
 
-        row += 1
-        prediction_tab_layout.addLayout(inputFilePathButtonsLayout, row, 0)
-        prediction_tab_layout.addLayout(maskLayout, row, 2)
-        prediction_tab_layout.addLayout(navLayout, row, 3)
+        current_row += 1
+        prediction_tab_layout.addLayout(outputAndMicroscopeLayout, current_row, 0, 1, 3)
 
-        row += 1
-        prediction_tab_layout.addLayout(outputFilePathLayout, row, 0, 1, 4)
+        current_row += 1
+        prediction_tab_layout.addWidget(predictionRunWidget, current_row, 0, 1, 2)
 
-        row += 1
-        prediction_tab_layout.addLayout(microscopeLayout, row, 0)
+        current_row += 1
+        prediction_tab_layout.addWidget(predictionLogWidget, current_row, 0, 1, 4)
 
-        row += 1
-        prediction_tab_layout.addLayout(predictionButtonLayout, row, 0, 1, 4)
-
-        row += 1
-        prediction_tab_layout.addWidget(progressLabel, row, 0, 1, 4)
-
-        row += 1
-        prediction_tab_layout.addWidget(self.progressPlainTextEdit, row, 0, 1, 4)
-
+    # sets up the layout and widgets for the re-training tab
     def setupRetrainTab(self):
-        # setup for the re-training tab
+        # --- Input File Section ---
         retrainInputFileLabel = self.createLabel("Input folder:")
-        retrainInputFileLabel.setStyleSheet("color: #333; font-weight: bold;")
         self.retrainInputDirButton = self.createButton("Browse", self.loadRetrainInputDirectory)
         self.retrainSelectAllButton = self.createButton("Select All", self.selectAllRetrainFiles)
         self.retrainDeselectAllButton = self.createButton("Deselect All", self.deselectAllRetrainFiles)
-        self.retrainInputFileListWidget = QListWidget()
-        self.retrainInputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.retrainInputFileListWidget.setFixedHeight(600)
-        self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
-        self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
-
-        self.retrainImagePreviewLabel = self.createLabel("Image Preview")
-        self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.retrainImagePreviewLabel.setFixedHeight(600)
-        self.retrainImagePreviewLabel.setMinimumWidth(800)
-        self.retrainImagePreviewLabel.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
-        self.retrainImagePreviewLabel.setAlignment(Qt.AlignCenter)
-
-        self.retrainImageFilenameLabel = self.createLabel("No file selected")
-        self.retrainImageFilenameLabel.setAlignment(Qt.AlignCenter)
-        self.retrainImageFilenameLabel.setStyleSheet("color: #333; font-weight: bold;")
-
-        self.retrainPrevButton = self.createButton("Previous", self.showPreviousRetrainImage)
-        self.retrainNextButton = self.createButton("Next", self.showNextRetrainImage)
-        self.retrainApplyMaskButton = self.createButton("Apply Mask", self.applyRetrainMask)
-        self.retrainRemoveMaskButton = self.createButton("Remove Mask", self.removeRetrainMask)
-
-        retrainNavLayout = QHBoxLayout()
-        retrainNavLayout.addWidget(self.retrainApplyMaskButton)
-        retrainNavLayout.addWidget(self.retrainRemoveMaskButton)
-        retrainNavLayout.addStretch()
-        retrainNavLayout.addWidget(self.retrainImageFilenameLabel)
-        retrainNavLayout.addWidget(self.retrainPrevButton)
-        retrainNavLayout.addWidget(self.retrainNextButton)
 
         retrainInputFilePathButtonsLayout = QHBoxLayout()
         retrainInputFilePathButtonsLayout.addWidget(self.retrainInputDirButton)
@@ -292,51 +266,234 @@ class PyMarAiGuiApp(QDialog):
         retrainInputFilePathButtonsLayout.addWidget(self.retrainDeselectAllButton)
         retrainInputFilePathButtonsLayout.addStretch()
 
-        retrainInputFileShowLayout = QHBoxLayout()
-        retrainInputFileShowLayout.addWidget(self.retrainInputFileListWidget)
-        retrainInputFileShowLayout.addWidget(self.retrainImagePreviewLabel)
+        self.retrainInputFileListWidget = QListWidget()
+        self.retrainInputFileListWidget.setFixedHeight(600)
+        self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
+        self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
 
-        self.retrainOutputFileLabel = self.createLabel("Output Folder:")
-        self.retrainOutputFileLabel.setStyleSheet("color: #333; font-weight: bold;")
+        retrainInputFileSectionLayout = QVBoxLayout()
+        retrainInputFileSectionLayout.addWidget(retrainInputFileLabel)
+        retrainInputFileSectionLayout.addWidget(self.retrainInputFileListWidget)
+        retrainInputFileSectionLayout.addLayout(retrainInputFilePathButtonsLayout)
+
+        retrainInputFileSectionWidget = QWidget()
+        retrainInputFileSectionWidget.setLayout(retrainInputFileSectionLayout)
+
+        # --- Image Preview Section ---
+        self.retrainImagePreviewLabel = self.createLabel("Image Preview")
+        self.retrainImagePreviewLabel.setFixedHeight(600)
+        self.retrainImagePreviewLabel.setMinimumWidth(800)
+        self.retrainImagePreviewLabel.setAlignment(Qt.AlignCenter)
+        self.retrainImagePreviewLabel.setStyleSheet("""
+            border: 1px solid #cccccc;
+            background-color: #fafafa;
+            border-radius: 6px;
+        """)
+
+        self.retrainImageFilenameLabel = self.createLabel("No file selected")
+        self.retrainImageFilenameLabel.setAlignment(Qt.AlignCenter)
+
+        self.retrainPrevButton = self.createButton("Previous", self.showPreviousRetrainImage)
+        self.retrainNextButton = self.createButton("Next", self.showNextRetrainImage)
+
+        retrainPrevNextButtonsLayout = QHBoxLayout()
+        retrainPrevNextButtonsLayout.addStretch()
+        retrainPrevNextButtonsLayout.addWidget(self.retrainPrevButton)
+        retrainPrevNextButtonsLayout.addWidget(self.retrainNextButton)
+        retrainPrevNextButtonsLayout.addStretch()
+
+        retrainImagePreviewLayout = QVBoxLayout()
+        retrainImagePreviewLayout.addWidget(self.retrainImageFilenameLabel)
+        retrainImagePreviewLayout.addWidget(self.retrainImagePreviewLabel)
+        retrainImagePreviewLayout.addLayout(retrainPrevNextButtonsLayout)
+
+        retrainImagePreviewWidget = QWidget()
+        retrainImagePreviewWidget.setLayout(retrainImagePreviewLayout)
+
+        # --- Mask Buttons + Placeholder for Display Options ---
+        self.retrainApplyMaskButton = self.createButton("Apply Mask", self.applyRetrainMask)
+        self.retrainRemoveMaskButton = self.createButton("Remove Mask", self.removeRetrainMask)
+
+        retrainMaskButtonsLayout = QHBoxLayout()
+        retrainMaskButtonsLayout.addWidget(self.retrainApplyMaskButton)
+        retrainMaskButtonsLayout.addWidget(self.retrainRemoveMaskButton)
+        retrainMaskButtonsLayout.addStretch()
+
+        retrainMaskControlsLayout = QVBoxLayout()
+        retrainMaskControlsLayout.addSpacing(21)
+        retrainMaskControlsLayout.addLayout(retrainMaskButtonsLayout)
+
+        mask_options_group_box = self.setupMaskDisplayOptions("retrain")
+
+        retrainMaskControlsLayout.addWidget(mask_options_group_box)
+        retrainMaskControlsWidget = QWidget()
+        retrainMaskControlsWidget.setLayout(retrainMaskControlsLayout)
+
+        # --- Output Folder Section ---
+        self.retrainOutputFileLabel = self.createLabel("Output folder:")
         self.retrainOutputFilePathTextEdit = self.createTextEdit()
-
         self.retrainOutputFilePathSelectButton = self.createButton("Browse", self.retrainOutputDirSelect)
-        retrainOutputFilePathLayout = QHBoxLayout()
-        retrainOutputFilePathLayout.addWidget(self.retrainOutputFileLabel)
-        retrainOutputFilePathLayout.addWidget(self.retrainOutputFilePathTextEdit)
-        retrainOutputFilePathLayout.addWidget(self.retrainOutputFilePathSelectButton)
 
+        retrainOutputLayout = QHBoxLayout()
+        retrainOutputLayout.addWidget(self.retrainOutputFileLabel)
+        retrainOutputLayout.addWidget(self.retrainOutputFilePathTextEdit)
+        retrainOutputLayout.addWidget(self.retrainOutputFilePathSelectButton)
+
+        retrainOutputWidget = QWidget()
+        retrainOutputWidget.setLayout(retrainOutputLayout)
+
+        # --- Re-training Run Button + Progress Bar ---
+        self.retrainButton = self.createButton("Run Re-training", self.retrainButtonPressed)
+        self.retrainButton.setFixedSize(140, 36)
+
+        self.retrainProgressBarLabel = QLabel()
+        self.retrainProgressBarLabel.hide()
+        self.retrainProgressBar = QProgressBar()
+        self.retrainProgressBar.setFixedHeight(8)
+        self.retrainProgressBar.setFixedWidth(300)
+        self.retrainProgressBar.setRange(0, 100)
+        self.retrainProgressBar.hide()
+
+        retrainRunLayout = QHBoxLayout()
+        retrainRunLayout.addWidget(self.retrainButton)
+        retrainRunLayout.addWidget(self.retrainProgressBarLabel)
+        retrainRunLayout.addWidget(self.retrainProgressBar)
+        retrainRunLayout.addStretch()
+
+        retrainRunWidget = QWidget()
+        retrainRunWidget.setLayout(retrainRunLayout)
+
+        # --- Progress Log Section ---
         retrainProgressLabel = self.createLabel("Progress Output:")
         self.retrainProgressPlainTextEdit = self.createPlainTextEdit()
 
-        retrain_tab_layout = QGridLayout(self.retrain_tab)
-        retrain_tab_layout.setColumnMinimumWidth(0, 75)
-        retrain_tab_layout.setColumnStretch(1, 1)
-        retrain_tab_layout.setColumnStretch(3, 1)
+        retrainLogLayout = QVBoxLayout()
+        retrainLogLayout.addWidget(retrainProgressLabel)
+        retrainLogLayout.addWidget(self.retrainProgressPlainTextEdit)
+
+        retrainLogWidget = QWidget()
+        retrainLogWidget.setLayout(retrainLogLayout)
+
+        # --- Final Tab Layout ---
+        layout = QGridLayout(self.retrain_tab)
 
         row = 0
-        retrain_tab_layout.addWidget(retrainInputFileLabel, row, 0)
+        layout.addWidget(retrainInputFileSectionWidget, row, 0)
+        layout.addWidget(retrainImagePreviewWidget, row, 1, 1, 2)
+        layout.addWidget(retrainMaskControlsWidget, row, 3, Qt.AlignTop | Qt.AlignRight)
 
         row += 1
-        retrain_tab_layout.addLayout(retrainInputFileShowLayout, row, 0, 1, 4)
+        layout.addWidget(retrainOutputWidget, row, 0, 1, 3)
 
         row += 1
-        retrain_tab_layout.addLayout(retrainInputFilePathButtonsLayout, row, 0)
-        retrain_tab_layout.addLayout(retrainNavLayout, row, 3)
+        layout.addWidget(retrainRunWidget, row, 0)
 
         row += 1
-        retrain_tab_layout.addLayout(retrainOutputFilePathLayout, row, 0, 1, 4)
+        layout.addWidget(retrainLogWidget, row, 0, 1, 4)
 
-        # row += 1
-        # retrain_tab_layout.addLayout(retrainButtonLayout, row, 0, 1, 4)
+    # creates and configures the QGroupBox for mask display options
+    def setupMaskDisplayOptions(self, tab_type):
+        group_box = QGroupBox("Mask Display Options:")
+        layout = QVBoxLayout()
 
-        row += 1
-        retrain_tab_layout.addWidget(retrainProgressLabel, row, 0, 1, 4)
+        # initialize separate state variables
+        if tab_type == 'prediction':
+            self.prediction_show_gradient = self.settings.value("showGradientPrediction", "false") == "true"
+            self.prediction_show_filled = self.settings.value("showFilledPrediction", "false") == "true"
+            self.prediction_show_contour = self.settings.value("showContourPrediction", "false") == "true"
+            self.prediction_gradient_colormap = self.settings.value("gradientColormapPrediction", "jet")
+            self.prediction_filled_color = QColor(self.settings.value("filledColorPrediction", "#0078d7"))
+            self.prediction_contour_color = QColor(self.settings.value("contourColorPrediction", "#a6d8fa"))
 
-        row += 1
-        retrain_tab_layout.addWidget(self.retrainProgressPlainTextEdit, row, 0, 1, 4)
+            gradient_checkbox = self.prediction_gradient_checkbox = QCheckBox("Gradient")
+            filled_checkbox = self.prediction_filled_checkbox = QCheckBox("Filled")
+            contour_checkbox = self.prediction_contour_checkbox = QCheckBox("Contour")
 
-    # initial state of elements
+        elif tab_type == 'retrain':
+            self.retrain_show_gradient = self.settings.value("showGradientRetrain", "false") == "true"
+            self.retrain_show_filled = self.settings.value("showFilledRetrain", "false") == "true"
+            self.retrain_show_contour = self.settings.value("showContourRetrain", "false") == "true"
+            self.retrain_gradient_colormap = self.settings.value("gradientColormapRetrain", "jet")
+            self.retrain_filled_color = QColor(self.settings.value("filledColorRetrain", "#0078d7"))
+            self.retrain_contour_color = QColor(self.settings.value("contourColorRetrain", "#a6d8fa"))
+
+            gradient_checkbox = self.retrain_gradient_checkbox = QCheckBox("Gradient")
+            filled_checkbox = self.retrain_filled_checkbox = QCheckBox("Filled")
+            contour_checkbox = self.retrain_contour_checkbox = QCheckBox("Contour")
+
+        # Set initial states
+        gradient_checkbox.setChecked(getattr(self, f"{tab_type}_show_gradient"))
+        filled_checkbox.setChecked(getattr(self, f"{tab_type}_show_filled"))
+        contour_checkbox.setChecked(getattr(self, f"{tab_type}_show_contour"))
+
+        # gradient colormap
+        colormap_combo = QComboBox()
+        colormaps = ['jet', 'viridis', 'plasma', 'inferno', 'magma', 'cividis', 'bone', 'copper', 'binary']
+        colormap_combo.addItems(colormaps)
+        colormap_combo.setFixedSize(100, 25)
+        selected_cmap = getattr(self, f"{tab_type}_gradient_colormap")
+        index = colormap_combo.findText(selected_cmap)
+        if index != -1:
+            colormap_combo.setCurrentIndex(index)
+
+        if tab_type == 'prediction':
+            self.prediction_gradient_colormap_combo = colormap_combo
+            colormap_combo.currentIndexChanged.connect(lambda: self.setGradientColormap("prediction"))
+        else:
+            self.retrain_gradient_colormap_combo = colormap_combo
+            colormap_combo.currentIndexChanged.connect(lambda: self.setGradientColormap("retrain"))
+
+        gradient_layout = QHBoxLayout()
+        gradient_layout.addWidget(gradient_checkbox)
+        gradient_layout.addWidget(colormap_combo)
+        layout.addLayout(gradient_layout)
+
+        # filled color
+        filled_color_button = QPushButton("Select Color")
+        filled_color_button.setFixedSize(100, 25)
+        color = getattr(self, f"{tab_type}_filled_color")
+        filled_color_button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
+
+        if tab_type == 'prediction':
+            self.prediction_filled_color_button = filled_color_button
+            filled_color_button.clicked.connect(lambda: self.pickFilledColor("prediction"))
+        else:
+            self.retrain_filled_color_button = filled_color_button
+            filled_color_button.clicked.connect(lambda: self.pickFilledColor("retrain"))
+
+        filled_layout = QHBoxLayout()
+        filled_layout.addWidget(filled_checkbox)
+        filled_layout.addWidget(filled_color_button)
+        layout.addLayout(filled_layout)
+
+        # contour color
+        contour_color_button = QPushButton("Select Color")
+        contour_color_button.setFixedSize(100, 25)
+        color = getattr(self, f"{tab_type}_contour_color")
+        contour_color_button.setStyleSheet(f"background-color: {color.name()};")
+
+        if tab_type == 'prediction':
+            self.prediction_contour_color_button = contour_color_button
+            contour_color_button.clicked.connect(lambda: self.pickContourColor("prediction"))
+        else:
+            self.retrain_contour_color_button = contour_color_button
+            contour_color_button.clicked.connect(lambda: self.pickContourColor("retrain"))
+
+        contour_layout = QHBoxLayout()
+        contour_layout.addWidget(contour_checkbox)
+        contour_layout.addWidget(contour_color_button)
+        layout.addLayout(contour_layout)
+
+        # store layout and state
+        gradient_checkbox.stateChanged.connect(lambda: (self.setMaskStyle(tab_type), self.enableWidgets(True)))
+        filled_checkbox.stateChanged.connect(lambda: (self.setMaskStyle(tab_type), self.enableWidgets(True)))
+        contour_checkbox.stateChanged.connect(lambda: (self.setMaskStyle(tab_type), self.enableWidgets(True)))
+
+        group_box.setLayout(layout)
+        return group_box
+
+    # initializes the state of GUI elements
     def initElements(self):
         self.enableWidgets(True)
 
@@ -357,6 +514,21 @@ class PyMarAiGuiApp(QDialog):
         self.retrainApplyMaskButton.setEnabled(False)
         self.retrainRemoveMaskButton.setEnabled(False)
 
+        # update prediction color buttons
+        self.prediction_contour_color_button.setStyleSheet(f"background-color: {self.prediction_contour_color.name()};")
+        self.prediction_filled_color_button.setStyleSheet(
+            f"background-color: {self.prediction_filled_color.name(QColor.HexArgb)};")
+
+        # update retrain color buttons
+        self.retrain_contour_color_button.setStyleSheet(f"background-color: {self.retrain_contour_color.name()};")
+        self.retrain_filled_color_button.setStyleSheet(
+            f"background-color: {self.retrain_filled_color.name(QColor.HexArgb)};")
+
+        # apply initial mask styles separately
+        self.setMaskStyle("prediction")
+        self.setMaskStyle("retrain")
+
+
     def enableWidgets(self, enable):
         # prediction tab widgets
         self.inputFileListWidget.setEnabled(enable)
@@ -368,6 +540,16 @@ class PyMarAiGuiApp(QDialog):
         self.deselectAllButton.setEnabled(enable)
         self.prevButton.setEnabled(enable)
         self.nextButton.setEnabled(enable)
+        self.openRoverButton.setEnabled(enable)
+
+        # prediction tab mask widgets
+        self.prediction_gradient_checkbox.setEnabled(enable)
+        self.prediction_filled_checkbox.setEnabled(enable)
+        self.prediction_contour_checkbox.setEnabled(enable)
+
+        self.prediction_gradient_colormap_combo.setEnabled(enable and self.prediction_gradient_checkbox.isChecked())
+        self.prediction_filled_color_button.setEnabled(enable and self.prediction_filled_checkbox.isChecked())
+        self.prediction_contour_color_button.setEnabled(enable and self.prediction_contour_checkbox.isChecked())
 
         # re-training tab widgets
         self.retrainInputFileListWidget.setEnabled(enable)
@@ -379,31 +561,110 @@ class PyMarAiGuiApp(QDialog):
         self.retrainPrevButton.setEnabled(enable)
         self.retrainNextButton.setEnabled(enable)
 
-    # function to create GUI elements
+        # retrain tab mask widgets
+        self.retrain_gradient_checkbox.setEnabled(enable)
+        self.retrain_filled_checkbox.setEnabled(enable)
+        self.retrain_contour_checkbox.setEnabled(enable)
+
+        self.retrain_gradient_colormap_combo.setEnabled(enable and self.retrain_gradient_checkbox.isChecked())
+        self.retrain_filled_color_button.setEnabled(enable and self.retrain_filled_checkbox.isChecked())
+        self.retrain_contour_color_button.setEnabled(enable and self.retrain_contour_checkbox.isChecked())
+
+    # helper to create a QPushButton
     def createButton(self, text, member):
         button = QPushButton(text)
-        button.setMaximumWidth(button.fontMetrics().boundingRect(text).width() + 7)
         button.clicked.connect(member)
         return button
 
+    # helper to create a QLabel
     def createLabel(self, text):
         label = QLabel(text)
         return label
 
+    # helper to create a QComboBox
     def createComboBox(self):
         comboBox = QComboBox()
         return comboBox
 
+    # helper to create a QPlaintextEdit
     def createPlainTextEdit(self):
         textEdit = QPlainTextEdit()
         textEdit.setReadOnly(True)
         return textEdit
 
+    # helper to create a QLineEdit
     def createTextEdit(self):
         lineEdit = QLineEdit()
         lineEdit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         return lineEdit
 
+    # updates the mask style based on checkbox selection
+    def setMaskStyle(self, tab_type):
+        show_gradient = getattr(self, f"{tab_type}_gradient_checkbox").isChecked()
+        show_filled = getattr(self, f"{tab_type}_filled_checkbox").isChecked()
+        show_contour = getattr(self, f"{tab_type}_contour_checkbox").isChecked()
+
+        setattr(self, f"{tab_type}_show_gradient", show_gradient)
+        setattr(self, f"{tab_type}_show_filled", show_filled)
+        setattr(self, f"{tab_type}_show_contour", show_contour)
+
+        self.settings.setValue(f"showGradient{tab_type.capitalize()}", str(show_gradient).lower())
+        self.settings.setValue(f"showFilled{tab_type.capitalize()}", str(show_filled).lower())
+        self.settings.setValue(f"showContour{tab_type.capitalize()}", str(show_contour).lower())
+
+        if tab_type == "prediction":
+            self.applyPredictionMask()
+        else:
+            self.applyRetrainMask()
+
+    # updates the selected colormap for gradient overlay
+    def setGradientColormap(self, tab_type):
+        colormap_combo = getattr(self, f"{tab_type}_gradient_colormap_combo")
+        cmap = colormap_combo.currentText()
+        setattr(self, f"{tab_type}_gradient_colormap", cmap)
+        self.settings.setValue(f"gradientColormap{tab_type.capitalize()}", cmap)
+
+        if getattr(self, f"{tab_type}_gradient_checkbox").isChecked():
+            if tab_type == "prediction":
+                self.applyPredictionMask()
+            else:
+                self.applyRetrainMask()
+
+    # opens a color dialog to pick the contour color
+    def pickContourColor(self, tab_type):
+        current_color = getattr(self, f"{tab_type}_contour_color")
+        color = QColorDialog.getColor(current_color, self, "Select Contour Color")
+        if color.isValid():
+            setattr(self, f"{tab_type}_contour_color", color)
+            self.settings.setValue(f"contourColor{tab_type.capitalize()}", color.name())
+
+            button = getattr(self, f"{tab_type}_contour_color_button")
+            button.setStyleSheet(f"background-color: {color.name()};")
+
+            if getattr(self, f"{tab_type}_contour_checkbox").isChecked():
+                if tab_type == "prediction":
+                    self.applyPredictionMask()
+                else:
+                    self.applyRetrainMask()
+
+    # opens a color dialog to pick the filled mask color
+    def pickFilledColor(self, tab_type):
+        current_color = getattr(self, f"{tab_type}_filled_color")
+        color = QColorDialog.getColor(current_color, self, "Select Fill Color", QColorDialog.ShowAlphaChannel)
+        if color.isValid():
+            setattr(self, f"{tab_type}_filled_color", color)
+            self.settings.setValue(f"filledColor{tab_type.capitalize()}", color.name(QColor.HexArgb))
+
+            button = getattr(self, f"{tab_type}_filled_color_button")
+            button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
+
+            if getattr(self, f"{tab_type}_filled_checkbox").isChecked():
+                if tab_type == "prediction":
+                    self.applyPredictionMask()
+                else:
+                    self.applyRetrainMask()
+
+    # opens a dialog to select the output directory for predictions
     def outputDirSelect(self):
         dir = QFileDialog.getExistingDirectory(self, 'Select a prediction output folder:')
         if dir != "":
@@ -416,6 +677,7 @@ class PyMarAiGuiApp(QDialog):
             if self.inputFileListWidget.count() > 0:
                 self.markAnalyzedFiles()
 
+    # opens a dialog to select the output directory for re-training
     def retrainOutputDirSelect(self):
         dir = QFileDialog.getExistingDirectory(self, 'Select a re-training output folder:')
         if dir != "":
@@ -423,6 +685,7 @@ class PyMarAiGuiApp(QDialog):
             self.retrainOutputFilePathTextEdit.insert(dir)
             self.settings.setValue("lastRetrainOutputDir", dir)
 
+ # updates the set of basenames for analyzed files in the output directory
     def updateOutputBasenames(self):
         self.outputBasenames = set()
         output_dir = self.outputFilePathTextEdit.text().strip()
@@ -433,6 +696,7 @@ class PyMarAiGuiApp(QDialog):
                 if os.path.isfile(os.path.join(output_dir, f))
             }
 
+    # marks files in the input list that have already been analyzed
     def markAnalyzedFiles(self):
         output_dir = self.outputFilePathTextEdit.text().strip()
 
@@ -447,29 +711,33 @@ class PyMarAiGuiApp(QDialog):
 
             if os.path.exists(v_path) and os.path.exists(rdf_path):
                 item.setText(original_text + " [✓]")
-                item.setForeground(Qt.darkGreen)
+                item.setForeground(QBrush(QColor("#A9A9A9")))
             else:
                 item.setText(original_text)
                 item.setForeground(Qt.black)
 
+    # removes the '[✓]' suffix from a filename string
     def cleanFilename(self, text):
         return text.split(" [")[0].strip()
 
+    # opens a dialog to select the input directory for predictions
     def loadInputDirectory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Prediction Input Folder")
         if dir_path:
             self.settings.setValue("lastInputDir", dir_path)
             self.loadFilesFromDirectory(dir_path)
 
+    # opens a dialog to select the input directory for re-training
     def loadRetrainInputDirectory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Re-training Input Folder")
         if dir_path:
             self.settings.setValue("lastRetrainInputDir", dir_path)
             self.loadRetrainFilesFromDirectory(dir_path)
 
+    # loads image files from a specified directory for prediction
     def loadFilesFromDirectory(self, dir_path):
         self.update_progress_text_signal.emit(
-            f"Scanning directory for prediction files: {dir_path}.\n")  # Updated message
+            f"Scanning directory for prediction files: {dir_path}.\n")
         self.inputFileListWidget.clear()
         self.setProgressBarText("Loading files...")
         self.previewList = []
@@ -484,6 +752,7 @@ class PyMarAiGuiApp(QDialog):
         self.fileLoader.finished.connect(self.predictionFileLoadingFinished)
         self.fileLoader.start()
 
+    # loads .v and .rdf files from a specified directory for re-training
     def loadRetrainFilesFromDirectory(self, dir_path):
         self.update_retrain_progress_text_signal.emit(f"Scanning directory for re-training files: {dir_path}.\n")
         self.retrainInputFileListWidget.clear()
@@ -492,7 +761,6 @@ class PyMarAiGuiApp(QDialog):
         self.processingRunning = True
         self.enableWidgets(False)
         self.predictionButton.setEnabled(False)
-        # self.retrainButton.setEnabled(False)
 
         self.retrainFileLoader = FileLoaderWorker(dir_path, (".v", ".rdf"))
         self.retrainFileLoader.filesLoaded.connect(self.onRetrainFilesLoaded)
@@ -500,6 +768,7 @@ class PyMarAiGuiApp(QDialog):
         self.retrainFileLoader.finished.connect(self.retrainFileLoadingFinished)
         self.retrainFileLoader.start()
 
+    # callback when prediction files are loaded by the worker
     def onPredictionFilesLoaded(self, file_list, dir_path):
         self.selectedInputDirectory = dir_path
         self.inputFileListWidget.clear()
@@ -523,8 +792,9 @@ class PyMarAiGuiApp(QDialog):
             self.imageFilenameLabel.setText("")
 
         self.update_progress_text_signal.emit(
-            f"Found {len(file_list)} compatible prediction files.\n")  # Updated message
+            f"Found {len(file_list)} compatible prediction files.\n")
 
+    # callback when re-training files are loaded by the worker
     def onRetrainFilesLoaded(self, file_list, dir_path):
         self.selectedRetrainInputDirectory = dir_path
         self.retrainInputFileListWidget.clear()
@@ -547,11 +817,12 @@ class PyMarAiGuiApp(QDialog):
 
         self.update_retrain_progress_text_signal.emit(f"Found {len(file_list)} compatible re-training files.\n")
 
+    # callback for file loading errors
     def onFileLoadError(self, error_message):
         self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction files: {error_message}.\n")
         self.imagePreviewLabel.setText("Failed to load images")
 
-    # prediction tab file loading completion
+    # callback when prediction file loading is finished
     def predictionFileLoadingFinished(self):
         self.processingRunning = False
         self.setProgressBarText()
@@ -560,12 +831,13 @@ class PyMarAiGuiApp(QDialog):
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
 
-    # re-training tab file loading completion
+    # callback when re-training file loading is finished
     def retrainFileLoadingFinished(self):
         self.processingRunning = False
         self.enableWidgets(True)
         self.predictionButton.setEnabled(True)
 
+    # updates the prediction preview list based on selected items
     def updatePreviewList(self):
         items = self.inputFileListWidget.selectedItems()
         self.originalPredictionImage = None
@@ -582,6 +854,7 @@ class PyMarAiGuiApp(QDialog):
             self.applyMaskButton.setEnabled(False)
             self.removeMaskButton.setEnabled(False)
 
+    # updates the re-training preview list based on selected items
     def updateRetrainPreviewList(self):
         items = self.retrainInputFileListWidget.selectedItems()
         self.originalRetrainImage = None
@@ -598,58 +871,130 @@ class PyMarAiGuiApp(QDialog):
             self.retrainApplyMaskButton.setEnabled(False)
             self.retrainRemoveMaskButton.setEnabled(False)
 
+    # displays the selected image in the prediction preview
     def showImageOnItemClick(self, item):
         filename = self.cleanFilename(item.text())
         self.previewList = [filename]
         self.previewIndex = 0
         self.showImageAtIndex(self.previewIndex)
 
+    # displays the selected image in the re-training preview
     def showRetrainImageOnItemClick(self, item):
         filename = self.cleanFilename(item.text())
         self.retrainPreviewList = [filename]
         self.retrainPreviewIndex = 0
         self.showRetrainImageAtIndex(self.retrainPreviewIndex)
 
-    def create_gradient_mask_overlay(self, original_image_pil, mask_pil, alpha=100, scale=255.0):
-        # blue for darker pixels, green for lighter pixels
-        start_color = (0, 0, 255)  # Blue
-        end_color = (0, 255, 0)  # Green
+    # creates a gradient mask overlay using a specified colormap
+    def create_gradient_mask_overlay(self, original_image_pil, mask_pil, colormap_name="jet", alpha=150):
+        # get the colormap
+        try:
+            cmap = plt.get_cmap(colormap_name)
+        except ValueError:
+            logger.warning(f"Colormap '{colormap_name}' not found. Falling back to 'jet'.")
+            cmap = plt.get_cmap('jet')
 
-        # convert original image to RGBA
-        original_image_rgba = original_image_pil.convert('RGBA')
+        # convert PIL images to NumPy arrays
+        original_image_np = np.array(original_image_pil.convert('RGB'))
+        mask_np = np.array(mask_pil.convert('L'))
 
-        # create an empty RGBA image for the overlay
-        overlay_image = Image.new('RGBA', original_image_rgba.size, (0, 0, 0, 0))
+        # calculate brightness from the original image (average of R, G, B channels)
+        brightness = original_image_np.astype(np.float32).mean(axis=2)
 
-        # get pixel data for both images
-        original_pixels = original_image_rgba.load()
-        mask_pixels = mask_pil.load()
-        overlay_pixels = overlay_image.load()
+        # get brightness values only for pixels under the mask
+        masked_brightness_values = brightness[mask_np > 0]
 
-        # get the size of the image
-        width, height = original_image_rgba.size
+        if masked_brightness_values.size > 0:
+            min_masked_brightness = masked_brightness_values.min()
+            max_masked_brightness = masked_brightness_values.max()
 
-        for y in range(height):
-            for x in range(width):
-                # apply overlay only where the mask is active
-                if mask_pixels[x, y] > 0:
-                    # get the average brightness of the original pixel
-                    r, g, b, _ = original_pixels[x, y]
-                    brightness = (r + g + b) // 3
+            if max_masked_brightness > min_masked_brightness:
+                # normalize brightness based on the min/max of ONLY the masked pixels
+                norm_brightness = (brightness - min_masked_brightness) / (max_masked_brightness - min_masked_brightness)
+                norm_brightness = np.clip(norm_brightness, 0, 1)
+            else:
+                # if all masked pixels have the same brightness, map them to the middle of the colormap
+                norm_brightness = np.full_like(brightness, 0.5)
+        else:
+            # if no mask pixels are active (or mask is empty), provide a default norm_brightness
+            norm_brightness = np.full_like(brightness, 0.5)
 
-                    # normalize brightness to a 0-1 scale
-                    t = brightness / scale
+        # apply the colormap to the normalized brightness values
+        colored_mask = cmap(norm_brightness)[:, :, :3] * 255
+        colored_mask = colored_mask.astype(np.uint8)
 
-                    # linearly interpolate between the start and end colors
-                    r_grad = int(start_color[0] * (1 - t) + end_color[0] * t)
-                    g_grad = int(start_color[1] * (1 - t) + end_color[1] * t)
-                    b_grad = int(start_color[2] * (1 - t) + end_color[2] * t)
+        # create an alpha channel for the overlay
+        overlay_alpha = np.where(mask_np > 0, alpha, 0).astype(np.uint8)
+        overlay_alpha = np.expand_dims(overlay_alpha, axis=2)
 
-                    overlay_pixels[x, y] = (r_grad, g_grad, b_grad, alpha)
+        # combine the colored mask with its alpha channel
+        overlay_rgba = np.concatenate((colored_mask, overlay_alpha), axis=2)
 
-        # composite the original image with the new overlay
-        return Image.alpha_composite(original_image_rgba, overlay_image)
+        # convert original image to RGBA for alpha compositing
+        original_image_rgba_np = np.array(original_image_pil.convert('RGBA'))
 
+        # perform alpha compositing using NumPy
+        # convert to float for calculation
+        alpha_orig = original_image_rgba_np[:, :, 3] / 255.0
+        alpha_overlay = overlay_rgba[:, :, 3] / 255.0
+
+        # create output alpha channel
+        out_alpha = alpha_overlay + alpha_orig * (1 - alpha_overlay)
+        out_alpha = np.clip(out_alpha, 0, 1)
+
+        # create output RGB channels
+        out_rgb = (overlay_rgba[:, :, :3].astype(np.float32) * alpha_overlay[:, :, np.newaxis] +
+                   original_image_rgba_np[:, :, :3].astype(np.float32) * alpha_orig[:, :, np.newaxis] * (1 - alpha_overlay[:, :, np.newaxis])) / (out_alpha[:, :, np.newaxis] + 1e-8) # Add small epsilon to prevent division by zero
+
+        # convert back to uint8 and combine for final image
+        combined_image_np = np.concatenate((out_rgb, (out_alpha * 255)[:, :, np.newaxis]), axis=2).astype(np.uint8)
+
+        # convert NumPy array back to PIL Image
+        return Image.fromarray(combined_image_np, 'RGBA')
+
+    # creates an overlay with only the contours of the mask
+    def create_contour_mask_overlay(self, original_image_pil, mask_pil, contour_color: QColor, thickness=2):
+        original_image = np.array(original_image_pil.convert('RGB'))
+        mask_np = np.array(mask_pil.convert('L'))
+
+        # normalize mask to binary
+        binary_mask = (mask_np > 0).astype(np.uint8)
+
+        # find contours with OpenCV
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # convert RGB to RGBA
+        overlay = cv2.cvtColor(original_image, cv2.COLOR_RGB2RGBA)
+
+        # convert QColor to BGR(A)
+        r, g, b, a = contour_color.getRgb()
+        color = (r, g, b, a)
+
+        # draw contours with desired thickness
+        cv2.drawContours(overlay, contours, -1, color, thickness=thickness)
+
+        return Image.fromarray(overlay)
+
+    # creates an overlay where the mask area is filled with a semi-transparent color
+    def create_filled_mask_overlay(self, original_image_pil, mask_pil, fill_color: QColor):
+        original_image_rgb = original_image_pil.convert('RGB')
+        mask_np = np.array(mask_pil.convert('L'))
+
+        # Create an empty RGBA image for the overlay
+        overlay = Image.new('RGBA', original_image_rgb.size, (0, 0, 0, 0))
+        overlay_pixels = overlay.load()
+
+        r, g, b, a = fill_color.getRgb()
+        a = min(a, 60)
+
+        for y in range(mask_np.shape[0]):
+            for x in range(mask_np.shape[1]):
+                if mask_np[y, x] > 0:
+                    overlay_pixels[x, y] = (r, g, b, a)
+
+        return Image.alpha_composite(original_image_rgb.convert('RGBA'), overlay)
+
+    # displays the image at the given index in the prediction preview
     def showImageAtIndex(self, index):
         if not self.previewList:
             self.imagePreviewLabel.setText("No files selected")
@@ -660,52 +1005,59 @@ class PyMarAiGuiApp(QDialog):
         full_input_path = os.path.join(self.selectedInputDirectory, filename)
         output_dir = self.outputFilePathTextEdit.text().strip()
 
-        # reset buttons
+        # Reset state
         self.applyMaskButton.setEnabled(False)
         self.removeMaskButton.setEnabled(False)
         self.originalPredictionImage = None
-
         self.imagePreviewLabel.setText("Loading...")
 
         try:
-            # load original image and store it
-            if full_input_path.lower().endswith(".tif"):
-                image = Image.open(full_input_path)
-                image = ImageOps.exif_transpose(image)
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
+            # Load and convert image
+            image = Image.open(full_input_path)
+            image = ImageOps.exif_transpose(image)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            self.originalPredictionImage = image
 
-                qimg = QImage(image.tobytes("raw", "RGB"), image.width, image.height, QImage.Format_RGB888)
-                self.originalPredictionImage = QPixmap.fromImage(qimg)
-            else:  # assuming .png
-                self.originalPredictionImage = QPixmap(full_input_path)
-                if self.originalPredictionImage.isNull():
-                    raise ValueError("[ERROR] QPixmap could not load the image.\n")
+            # Convert PIL to QPixmap
+            qimg = QImage(image.tobytes("raw", "RGB"),
+                          image.width, image.height,
+                          QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
 
-            # fixed height for preview
+            # Scale image height to 600px and compute new width
             fixed_height = 600
-            width, height = self.originalPredictionImage.width(), self.originalPredictionImage.height()
-            aspect_ratio = width / height
-            new_height = fixed_height
+            aspect_ratio = pixmap.width() / pixmap.height()
             new_width = int(fixed_height * aspect_ratio)
 
-            # resize the label and scale the pixmap accordingly
-            self.imagePreviewLabel.setFixedSize(new_width, new_height)
-            scaled_pixmap = self.originalPredictionImage.scaled(new_width, new_height, Qt.KeepAspectRatio,
-                                                                Qt.SmoothTransformation)
-            self.imagePreviewLabel.setPixmap(scaled_pixmap)
+            # Resize label accordingly
+            self.imagePreviewLabel.setFixedSize(new_width, fixed_height)
+
+            # Scale the pixmap
+            scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            # Create rounded pixmap
+            rounded_pixmap = QPixmap(scaled_pixmap.size())
+            rounded_pixmap.fill(Qt.transparent)
+
+            painter = QPainter(rounded_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            path = QPainterPath()
+            radius = 8
+            path.addRoundedRect(0, 0, scaled_pixmap.width(), scaled_pixmap.height(), radius, radius)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+
+            self.imagePreviewLabel.setPixmap(rounded_pixmap)
             self.imagePreviewLabel.setText("")
 
-            # check if the current item is marked as analyzed and enable apply mask button
-            current_item = None
+            # Enable Apply Mask if marked as analyzed
             for i in range(self.inputFileListWidget.count()):
                 item = self.inputFileListWidget.item(i)
-                if self.cleanFilename(item.text()) == filename:
-                    current_item = item
+                if self.cleanFilename(item.text()) == filename and "[✓]" in item.text():
+                    self.applyMaskButton.setEnabled(True)
                     break
-
-            if current_item and "[✓]" in current_item.text():
-                self.applyMaskButton.setEnabled(True)
 
         except Exception as e:
             self.imagePreviewLabel.setText("Failed to load image.\n")
@@ -714,26 +1066,22 @@ class PyMarAiGuiApp(QDialog):
             self.applyMaskButton.setEnabled(False)
             self.removeMaskButton.setEnabled(False)
 
+    # generates the CNN mask using thrass and overlays it on the original image
+    # based on the selected mask style
     def generateAndOverlayPredictionMask(self, filename):
         full_input_path = os.path.join(self.selectedInputDirectory, filename)
         output_dir = self.outputFilePathTextEdit.text().strip()
         base_name, _ = os.path.splitext(filename)
         v_file_path_in_output = os.path.join(output_dir, base_name + ".v")
-        rdf_file_path_in_output = os.path.join(output_dir, base_name + ".rdf")
         generated_mask_path = os.path.join(output_dir, base_name + "_cnn.v")
 
-        # load the original input image (tif/png) as the background
-        if full_input_path.lower().endswith(".tif"):
-            original_image_pil = Image.open(full_input_path)
-            original_image_pil = ImageOps.exif_transpose(original_image_pil)
-            if original_image_pil.mode != "RGB":
-                original_image_pil = original_image_pil.convert("RGB")
-        else:  # assuming .png
-            original_image_pil = Image.open(full_input_path)
-            if original_image_pil.mode != "RGB":
-                original_image_pil = original_image_pil.convert("RGB")
+        # Load the original input image
+        original_image_pil = Image.open(full_input_path)
+        original_image_pil = ImageOps.exif_transpose(original_image_pil)
+        if original_image_pil.mode != "RGB":
+            original_image_pil = original_image_pil.convert("RGB")
 
-        # use timestamp from .v file in output directory to tag cache
+        # Cache logic
         try:
             v_file_mtime = os.path.getmtime(v_file_path_in_output)
             v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
@@ -741,52 +1089,35 @@ class PyMarAiGuiApp(QDialog):
             self.update_progress_text_signal.emit(f"[ERROR] Failed to get timestamp for {v_file_path_in_output}: {e}\n")
             raise
 
-        cache_dir = "/tmp/marai_cnn_masks_prediction"  # Separate cache for prediction tab
+        cache_dir = "/tmp/marai_cnn_masks_prediction"
         os.makedirs(cache_dir, exist_ok=True)
         cached_mask_name = f"{base_name}_{v_file_timestamp}_cnn.v"
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
 
-        mask_file_to_use = None
-
         if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
-            self.update_progress_text_signal.emit(f"[INFO] Using cached mask for prediction: {cached_mask_path}\n")
+            self.update_progress_text_signal.emit(f"[INFO] Using cached mask: {cached_mask_path}\n")
             mask_file_to_use = cached_mask_path
         else:
-            self.update_progress_text_signal.emit(
-                f"Running thrass for mask generation on {os.path.basename(v_file_path_in_output)} in output directory...\n")
-
+            self.update_progress_text_signal.emit(f"Running thrass for mask generation...\n")
             thrass_command = ["thrass", "-t", "cnnPrepare", "-b", os.path.basename(v_file_path_in_output)]
             env = os.environ.copy()
-            result = subprocess.run(
-                thrass_command,
-                capture_output=True,
-                text=True,
-                cwd=output_dir,
-                env=env
-            )
+            result = subprocess.run(thrass_command, capture_output=True, text=True, cwd=output_dir, env=env)
 
             self.update_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
             if result.stderr:
                 self.update_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
-
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Thrass failed with exit code {result.returncode} for file: {v_file_path_in_output}")
+                raise RuntimeError(f"Thrass failed with exit code {result.returncode}")
 
+            # Wait for the mask
             wait_time = 0
-            max_wait = 5
-            while not os.path.exists(generated_mask_path) and wait_time < max_wait:
+            while not os.path.exists(generated_mask_path) and wait_time < 5:
                 time.sleep(0.5)
                 wait_time += 0.5
-
             if not os.path.exists(generated_mask_path):
-                raise FileNotFoundError(
-                    f"Thrass mask file not found at: {generated_mask_path}\n"
-                    f"Check if RDF is missing or malformed for {v_file_path_in_output}."
-                )
+                raise FileNotFoundError(f"Mask file not found: {generated_mask_path}")
 
-            shutil.copy2(str(generated_mask_path), str(cached_mask_path))
-            self.update_progress_text_signal.emit(f"[INFO] Cached mask for prediction: {cached_mask_path}\n")
+            shutil.copy2(generated_mask_path, cached_mask_path)
             mask_file_to_use = cached_mask_path
 
             for fname in os.listdir(output_dir):
@@ -797,35 +1128,42 @@ class PyMarAiGuiApp(QDialog):
                     except Exception as e:
                         self.update_progress_text_signal.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
 
-        if not mask_file_to_use:
-            raise FileNotFoundError("Mask file could not be determined or generated.")
-
-        mask_data_pmedio = pmedio.read(mask_file_to_use)
-        mask_data = mask_data_pmedio.toarray()
-        mask_data_squeezed = np.squeeze(mask_data)
-
-        if mask_data_squeezed.max() > mask_data_squeezed.min():
-            normalized_mask_data = ((mask_data_squeezed - mask_data_squeezed.min()) /
-                                    (mask_data_squeezed.max() - mask_data_squeezed.min()) * 255).astype(np.uint8)
+        # Load and normalize mask
+        mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
+        if mask_data.max() > mask_data.min():
+            normalized_mask = ((mask_data - mask_data.min()) / (mask_data.max() - mask_data.min()) * 255).astype(
+                np.uint8)
         else:
-            normalized_mask_data = np.zeros_like(mask_data_squeezed, dtype=np.uint8)
+            normalized_mask = np.zeros_like(mask_data, dtype=np.uint8)
 
-        mask_pil = Image.fromarray(normalized_mask_data.T)
-        if mask_pil.mode != 'L':
-            mask_pil = mask_pil.convert('L')
-
+        mask_pil = Image.fromarray(normalized_mask.T).convert('L')
         mask_pil = mask_pil.rotate(180, expand=False)
         mask_pil = mask_pil.resize(original_image_pil.size, Image.Resampling.NEAREST)
 
-        combined_image_pil = self.create_gradient_mask_overlay(original_image_pil, mask_pil, alpha=150, scale=125.0)
+        # Start with original image as base
+        combined_image_pil = original_image_pil.convert('RGBA')
+
+        # Apply selected overlays
+        if self.prediction_show_gradient:
+            combined_image_pil = self.create_gradient_mask_overlay(
+                combined_image_pil, mask_pil, colormap_name=self.prediction_gradient_colormap, alpha=150)
+
+        if self.prediction_show_filled:
+            combined_image_pil = self.create_filled_mask_overlay(
+                combined_image_pil, mask_pil, fill_color=self.prediction_filled_color)
+
+        if self.prediction_show_contour:
+            combined_image_pil = self.create_contour_mask_overlay(
+                combined_image_pil, mask_pil, contour_color=self.prediction_contour_color)
 
         qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
                       combined_image_pil.width, combined_image_pil.height,
                       QImage.Format_RGBA8888)
         return QPixmap.fromImage(qimg)
 
+    # applies the selected mask style to the current prediction image
     def applyPredictionMask(self):
-        if not self.previewList:
+        if not self.previewList or not self.originalPredictionImage:
             return
 
         self.imagePreviewLabel.setText("Applying mask...")
@@ -851,15 +1189,21 @@ class PyMarAiGuiApp(QDialog):
             self.update_progress_text_signal.emit(f"[ERROR] Failed to apply mask: {e}.\n")
             self.removePredictionMask()
 
+    # removes the mask overlay and displays the original prediction image
     def removePredictionMask(self):
         if self.originalPredictionImage:
+            qimg = QImage(self.originalPredictionImage.tobytes("raw", "RGB"),
+                          self.originalPredictionImage.width, self.originalPredictionImage.height,
+                          QImage.Format_RGB888)
+            pixmap_to_display = QPixmap.fromImage(qimg)
+
             fixed_height = 600
-            width, height = self.originalPredictionImage.width(), self.originalPredictionImage.height()
+            width, height = pixmap_to_display.width(), pixmap_to_display.height()
             aspect_ratio = width / height
             new_height = fixed_height
             new_width = int(fixed_height * aspect_ratio)
             self.imagePreviewLabel.setFixedSize(new_width, new_height)
-            scaled_pixmap = self.originalPredictionImage.scaled(new_width, new_height, Qt.KeepAspectRatio,
+            scaled_pixmap = pixmap_to_display.scaled(new_width, new_height, Qt.KeepAspectRatio,
                                                                 Qt.SmoothTransformation)
             self.imagePreviewLabel.setPixmap(scaled_pixmap)
             self.applyMaskButton.setEnabled(True)
@@ -870,7 +1214,7 @@ class PyMarAiGuiApp(QDialog):
             self.applyMaskButton.setEnabled(False)
             self.removeMaskButton.setEnabled(False)
 
-    # display images in the re-training tab's preview
+    # displays the image at the given index in the re-training preview
     def showRetrainImageAtIndex(self, index):
         if not self.retrainPreviewList:
             self.retrainImagePreviewLabel.setText("No files selected")
@@ -907,20 +1251,38 @@ class PyMarAiGuiApp(QDialog):
             if original_image_pil.mode != 'RGB':
                 original_image_pil = original_image_pil.convert('RGB')
 
-            qimg = QImage(original_image_pil.tobytes("raw", "RGB"), original_image_pil.width, original_image_pil.height,
-                          QImage.Format_RGB888)
-            self.originalRetrainImage = QPixmap.fromImage(qimg)
+            self.originalRetrainImage = original_image_pil  # Store PIL Image
 
+            # Convert PIL to QPixmap
+            qimg = QImage(self.originalRetrainImage.tobytes("raw", "RGB"),
+                          self.originalRetrainImage.width,
+                          self.originalRetrainImage.height,
+                          QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+
+            # Resize image height to 600px and calculate width proportionally
             fixed_height = 600
-            width, height = self.originalRetrainImage.width(), self.originalRetrainImage.height()
-            aspect_ratio = width / height
-            new_height = fixed_height
+            aspect_ratio = pixmap.width() / pixmap.height()
             new_width = int(fixed_height * aspect_ratio)
 
-            self.retrainImagePreviewLabel.setFixedSize(new_width, new_height)
-            scaled_pixmap = self.originalRetrainImage.scaled(new_width, new_height, Qt.KeepAspectRatio,
-                                                             Qt.SmoothTransformation)
-            self.retrainImagePreviewLabel.setPixmap(scaled_pixmap)
+            self.retrainImagePreviewLabel.setFixedSize(new_width, fixed_height)
+
+            scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            # Apply rounded corners
+            rounded_pixmap = QPixmap(scaled_pixmap.size())
+            rounded_pixmap.fill(Qt.transparent)
+
+            painter = QPainter(rounded_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            path = QPainterPath()
+            radius = 8
+            path.addRoundedRect(0, 0, scaled_pixmap.width(), scaled_pixmap.height(), radius, radius)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+
+            self.retrainImagePreviewLabel.setPixmap(rounded_pixmap)
             self.retrainImagePreviewLabel.setText("")
 
             self.retrainApplyMaskButton.setEnabled(True)
@@ -929,6 +1291,7 @@ class PyMarAiGuiApp(QDialog):
             self.retrainImagePreviewLabel.setText(f"Error loading image: {e}")
             self.update_retrain_progress_text_signal.emit(f"[ERROR] {e}\n")
 
+    # generates the CNN mask for re-training data and overlays it on the original .v image
     def generateAndOverlayRetrainMask(self, filename_base):
         v_filename = filename_base + ".v"
         v_file_path = os.path.join(self.selectedRetrainInputDirectory, v_filename)
@@ -1008,7 +1371,7 @@ class PyMarAiGuiApp(QDialog):
         if mask_pil.mode != 'L':
             mask_pil = mask_pil.convert('L')
 
-        # Load the original V file data as the background image for overlay
+        # load the original V file data as the background image for overlay
         v_data_pmedio = pmedio.read(v_file_path)
         original_v_data = v_data_pmedio.toarray()
         original_v_data_squeezed = np.squeeze(original_v_data)
@@ -1024,15 +1387,30 @@ class PyMarAiGuiApp(QDialog):
         if original_image_pil.mode != 'RGB':
             original_image_pil = original_image_pil.convert('RGB')
 
-        combined_image_pil = self.create_gradient_mask_overlay(original_image_pil, mask_pil, alpha=150, scale=255.0)
+        # Start with original image as base
+        combined_image_pil = original_image_pil.convert('RGBA')
+
+        # Apply selected overlays
+        if self.retrain_show_gradient:
+            combined_image_pil = self.create_gradient_mask_overlay(
+                combined_image_pil, mask_pil, colormap_name=self.retrain_gradient_colormap, alpha=150)
+
+        if self.retrain_show_filled:
+            combined_image_pil = self.create_filled_mask_overlay(
+                combined_image_pil, mask_pil, fill_color=self.retrain_filled_color)
+
+        if self.retrain_show_contour:
+            combined_image_pil = self.create_contour_mask_overlay(
+                combined_image_pil, mask_pil, contour_color=self.retrain_contour_color)
 
         qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
-                      combined_image_pil.width, combined_image_pil.height,
-                      QImage.Format_RGBA8888)
+                        combined_image_pil.width, combined_image_pil.height,
+                        QImage.Format_RGBA8888)
         return QPixmap.fromImage(qimg)
 
+    # applies the mask to the current re-training image
     def applyRetrainMask(self):
-        if not self.retrainPreviewList:
+        if not self.retrainPreviewList or not self.originalRetrainImage:
             return
 
         self.retrainImagePreviewLabel.setText("Applying mask...")
@@ -1059,16 +1437,22 @@ class PyMarAiGuiApp(QDialog):
             self.update_retrain_progress_text_signal.emit(f"[ERROR] Failed to apply mask: {e}.\n")
             self.removeRetrainMask()
 
+    # removes the mask overlay and displays the original re-training image
     def removeRetrainMask(self):
         if self.originalRetrainImage:
+            qimg = QImage(self.originalRetrainImage.tobytes("raw", "RGB"),
+                          self.originalRetrainImage.width, self.originalRetrainImage.height,
+                          QImage.Format_RGB888)
+            pixmap_to_display = QPixmap.fromImage(qimg)
+
             fixed_height = 600
-            width, height = self.originalRetrainImage.width(), self.originalRetrainImage.height()
+            width, height = pixmap_to_display.width(), pixmap_to_display.height()
             aspect_ratio = width / height
             new_height = fixed_height
             new_width = int(fixed_height * aspect_ratio)
             self.retrainImagePreviewLabel.setFixedSize(new_width, new_height)
-            scaled_pixmap = self.originalRetrainImage.scaled(new_width, new_height, Qt.KeepAspectRatio,
-                                                             Qt.SmoothTransformation)
+            scaled_pixmap = pixmap_to_display.scaled(new_width, new_height, Qt.KeepAspectRatio,
+                                                     Qt.SmoothTransformation)
             self.retrainImagePreviewLabel.setPixmap(scaled_pixmap)
             self.retrainApplyMaskButton.setEnabled(True)
             self.retrainRemoveMaskButton.setEnabled(False)
@@ -1139,10 +1523,12 @@ class PyMarAiGuiApp(QDialog):
         # call the new method with the list of files
         self.openMultipleFilesInRover(selected_filenames)
 
+    # selects all files in the re-training input list
     def selectAllRetrainFiles(self):
         self.retrainInputFileListWidget.selectAll()
         self.updateRetrainPreviewList()
 
+    # deselects all files in the re-training input list
     def deselectAllRetrainFiles(self):
         self.retrainInputFileListWidget.clearSelection()
         self.updateRetrainPreviewList()
@@ -1198,7 +1584,7 @@ class PyMarAiGuiApp(QDialog):
                 f"[ERROR] '{filename}' is not marked as analyzed. Skipping open with ROVER.\n")
             return
 
-        # Call the new method with a single file
+        # call the new method with a single file
         self.openMultipleFilesInRover([filename])
 
     def openMultipleFilesInRover(self, selected_filenames):
@@ -1398,6 +1784,8 @@ class PyMarAiGuiApp(QDialog):
         self.markAnalyzedFiles()
         self.switchElementsToPrediction(False)
 
+    def retrainButtonPressed(self):
+        pass
 
 class PyMarAiThread(QtCore.QThread):
     progress_update = pyqtSignal(int, int, str, str)
@@ -1601,6 +1989,20 @@ class PyMarAiThread(QtCore.QThread):
                     except Exception as e:
                         logger.error(f"Error closing progress_pipe_child in PredictionProcess: {e}")
 
+class StdIORedirector:
+    def __init__(self, pipe_connection):
+        self.pipe = pipe_connection
+
+    def write(self, string):
+        if string and self.pipe and not self.pipe.closed:
+            try:
+                self.pipe.send(string)
+            except Exception as e:
+                logger.error(f"[ERROR] Error writing to pipe in StdIORedirector: {e}")
+
+    def flush(self):
+        # no-op for pipes, as send is usually immediate
+        pass
 
 # thread to load data
 class FileLoaderWorker(QThread):
@@ -1635,11 +2037,162 @@ class FileLoaderWorker(QThread):
 # main function to start GUI
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet("""
+/* Global Font */
+* {
+    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
+    font-size: 14px;
+}
+
+/* QPushButton */
+QPushButton {
+    background-color: #0078d7;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 4px 10px;
+}
+QPushButton:hover {
+    background-color: #005fa3;
+}
+QPushButton:pressed {
+    background-color: #004e8c;
+}
+QPushButton:disabled {
+    background-color: #cccccc;
+    color: #666666;
+}
+
+/* QLabel */
+QLabel {
+    color: #2e2e2e;    font-weight: normal;
+}
+
+/* QComboBox */
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #cccccc;
+    border-radius: 6px;
+    padding: 4px 6px;
+    selection-background-color: #0078d7;
+}
+QComboBox::drop-down {
+    border: none;
+}
+
+/* QGroupBox */
+QGroupBox {
+        border: 1px solid #cccccc;
+        border-radius: 8px;
+        margin-top: 10px;
+        background-color: #f9f9f9;
+        padding: 10px;
+    }
+    QGroupBox:title {
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 3px 0 3px;
+    }
+
+/* QTabWidget */
+QTabWidget::pane {
+    border: 1px solid #c2c7cb;
+    border-top: none;  
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+    background: #ffffff;
+    padding: 6px;
+    margin-top: -1px; 
+}
+
+/* Tab Bar alignment */
+QTabWidget::tab-bar {
+    left: 0px;
+}
+
+/* QTabBar Tabs */
+QTabBar::tab {
+    background: #f5f5f5;
+    border: 1px solid #c2c7cb;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    min-width: 100px;
+    padding: 8px 16px;
+    margin-right: 1px;
+    font-weight: normal;
+    color: #333333;
+}
+
+/* Selected tab */
+QTabBar::tab:selected {
+    background: #ffffff;
+    border: 1px solid #c2c7cb;
+    border-bottom-color: #ffffff;
+    font-weight: 500;
+    color: #0078d7;
+}
+
+/* Hovered tab */
+QTabBar::tab:hover {
+    background: #eaeaea;
+}
+
+/* Disabled tab */
+QTabBar::tab:!enabled {
+    color: #999999;
+}
+
+/* QLineEdit (for folder path) */
+QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+/* QTextEdit & QPlainTextEdit for logs */
+QTextEdit, QPlainTextEdit {
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 6px;
+    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
+    font-size: 13px;
+    color: #2d2d2d;
+}
+
+/* QListWidget */
+QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 2px;
+}
+QListWidget::item:selected {
+    background-color: #a6d8fa; 
+    color: black;
+}
+QListWidget::item:hover {
+    background-color: #e6f7ff; 
+}
+
+/* QProgressBar */
+QProgressBar {
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background-color: #0078d7;
+    border-radius: 4px;
+}
+""")
     config = AppConfig()
     window = PyMarAiGuiApp(config)
     window.show()
     sys.exit(app.exec_())
-
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
