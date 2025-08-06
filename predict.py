@@ -3,7 +3,9 @@ import os
 import argparse
 import traceback
 import logging
+import platform
 from marai import MarAiLocal, MarAiRemote
+from config import AppConfig
 from multiprocessing import Event
 from multiprocessing.connection import Connection
 
@@ -122,11 +124,25 @@ def gui_entry_point(params: dict, username: str, password: str,
     progress_callback = make_progress_callback(progress_pipe_connection, gui_log_fn)
 
     try:
+        default_hostname = AppConfig().get_default_host()
+        current_hostname = platform.node()
+
+        use_local = (current_hostname == default_hostname)
+
+        # log the decision
+        if use_local:
+            gui_log_fn("The current machine matches the default host in the config. Running locally.")
+        elif not username or not password:
+            # if no SSH creds are provided and it's not the default host, we can't run.
+            raise ValueError("Not on the default host and no SSH credentials provided for remote execution.")
+        else:
+            gui_log_fn(f"Running remotely. Current host: {current_hostname}, Default host: {default_hostname}.")
+
         task = PredictionTask(
             input_files=params.get('input_files', []),
             output_dir=params.get('output_dir'),
             microscope_number=params.get('microscope_number'),
-            use_local=(not username or not password),
+            use_local=use_local,
             ssh_username=username,
             ssh_password=password,
             stop_event=stop_event,
@@ -134,9 +150,11 @@ def gui_entry_point(params: dict, username: str, password: str,
             log_fn=gui_log_fn
         )
         task.run()
+
     except Exception as e:
         root_logger.error(f"Unhandled exception in gui_entry_point: {e}", exc_info=True)
         raise
+
     finally:
         # Clean up pipes
         if stdout_pipe_connection and not stdout_pipe_connection.closed:
