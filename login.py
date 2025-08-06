@@ -1,4 +1,5 @@
-from PyQt5.QtWidgets import QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QLabel
+import getpass
+from PyQt5.QtWidgets import QDialog, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QApplication
 
 # window to enter username and password
 class LoginDialog(QDialog):
@@ -11,6 +12,7 @@ class LoginDialog(QDialog):
 
         self.username_edit = QLineEdit()
         self.username_edit.setPlaceholderText("Username")
+        self.username_edit.setText(getpass.getuser())
         layout.addWidget(QLabel("Username:"))
         layout.addWidget(self.username_edit)
 
