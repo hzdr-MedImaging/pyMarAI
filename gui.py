@@ -2158,164 +2158,164 @@ class MaskBatchWorker(QThread):
 # main function to start GUI
 def main():
     app = QApplication(sys.argv)
-    app.setStyleSheet("""
-/* Global Font */
-* {
-    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
-    font-size: 14px;
-}
-
-/* QPushButton */
-QPushButton {
-    background-color: #0078d7;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    padding: 4px 10px;
-}
-QPushButton:hover {
-    background-color: #005fa3;
-}
-QPushButton:pressed {
-    background-color: #004e8c;
-}
-QPushButton:disabled {
-    background-color: #cccccc;
-    color: #666666;
-}
-
-/* QLabel */
-QLabel {
-    color: #2e2e2e;    font-weight: normal;
-}
-
-/* QComboBox */
-QComboBox {
-    background-color: #ffffff;
-    border: 1px solid #cccccc;
-    border-radius: 6px;
-    padding: 4px 6px;
-    selection-background-color: #0078d7;
-}
-QComboBox::drop-down {
-    border: none;
-}
-
-/* QGroupBox */
-QGroupBox {
-        border: 1px solid #cccccc;
-        border-radius: 8px;
-        margin-top: 10px;
-        background-color: #f9f9f9;
-        padding: 10px;
-    }
-    QGroupBox:title {
-        subcontrol-origin: margin;
-        left: 10px;
-        padding: 0 3px 0 3px;
-    }
-
-/* QTabWidget */
-QTabWidget::pane {
-    border: 1px solid #c2c7cb;
-    border-top: none;  
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
-    background: #ffffff;
-    padding: 6px;
-    margin-top: -1px; 
-}
-
-/* Tab Bar alignment */
-QTabWidget::tab-bar {
-    left: 0px;
-}
-
-/* QTabBar Tabs */
-QTabBar::tab {
-    background: #f5f5f5;
-    border: 1px solid #c2c7cb;
-    border-bottom: none;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    min-width: 100px;
-    padding: 8px 16px;
-    margin-right: 1px;
-    font-weight: normal;
-    color: #333333;
-}
-
-/* Selected tab */
-QTabBar::tab:selected {
-    background: #ffffff;
-    border: 1px solid #c2c7cb;
-    border-bottom-color: #ffffff;
-    font-weight: 500;
-    color: #0078d7;
-}
-
-/* Hovered tab */
-QTabBar::tab:hover {
-    background: #eaeaea;
-}
-
-/* Disabled tab */
-QTabBar::tab:!enabled {
-    color: #999999;
-}
-
-/* QLineEdit (for folder path) */
-QLineEdit {
-    background-color: #ffffff;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 4px 6px;
-}
-
-/* QTextEdit & QPlainTextEdit for logs */
-QTextEdit, QPlainTextEdit {
-    background-color: #ffffff;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 6px;
-    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
-    font-size: 13px;
-    color: #2d2d2d;
-}
-
-/* QListWidget */
-QListWidget {
-    background-color: #ffffff;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 2px;
-}
-QListWidget::item:selected {
-    background-color: #a6d8fa; 
-    color: black;
-}
-QListWidget::item:hover {
-    background-color: #e6f7ff; 
-}
-
-/* QProgressBar */
-QProgressBar {
-    background-color: #f0f0f0;
-    border: 1px solid #bbb;
-    border-radius: 6px;
-    text-align: center;
-    min-height: 20px;
-    font: 13px 'Segoe UI', 'Ubuntu', 'Arial', sans-serif;
-    color: #333;
-    padding: 2px;
-}
-
-QProgressBar::chunk {
-    background-color: #0078d7;
-    border-radius: 6px;
-    margin: 0px;
-}
-""")
+#    app.setStyleSheet("""
+#/* Global Font */
+#* {
+#    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
+#    font-size: 14px;
+#}
+#
+#/* QPushButton */
+#QPushButton {
+#    background-color: #0078d7;
+#    color: white;
+#    border: none;
+#    border-radius: 5px;
+#    padding: 4px 10px;
+#}
+#QPushButton:hover {
+#    background-color: #005fa3;
+#}
+#QPushButton:pressed {
+#    background-color: #004e8c;
+#}
+#QPushButton:disabled {
+#    background-color: #cccccc;
+#    color: #666666;
+#}
+#
+#/* QLabel */
+#QLabel {
+#    color: #2e2e2e;    font-weight: normal;
+#}
+#
+#/* QComboBox */
+#QComboBox {
+#    background-color: #ffffff;
+#    border: 1px solid #cccccc;
+#    border-radius: 6px;
+#    padding: 4px 6px;
+#    selection-background-color: #0078d7;
+#}
+#QComboBox::drop-down {
+#    border: none;
+#}
+#
+#/* QGroupBox */
+#QGroupBox {
+#        border: 1px solid #cccccc;
+#        border-radius: 8px;
+#        margin-top: 10px;
+#        background-color: #f9f9f9;
+#        padding: 10px;
+#    }
+#    QGroupBox:title {
+#        subcontrol-origin: margin;
+#        left: 10px;
+#        padding: 0 3px 0 3px;
+#    }
+#
+#/* QTabWidget */
+#QTabWidget::pane {
+#    border: 1px solid #c2c7cb;
+#    border-top: none;  
+#    border-bottom-left-radius: 6px;
+#    border-bottom-right-radius: 6px;
+#    background: #ffffff;
+#    padding: 6px;
+#    margin-top: -1px; 
+#}
+#
+#/* Tab Bar alignment */
+#QTabWidget::tab-bar {
+#    left: 0px;
+#}
+#
+#/* QTabBar Tabs */
+#QTabBar::tab {
+#    background: #f5f5f5;
+#    border: 1px solid #c2c7cb;
+#    border-bottom: none;
+#    border-top-left-radius: 8px;
+#    border-top-right-radius: 8px;
+#    min-width: 100px;
+#    padding: 8px 16px;
+#    margin-right: 1px;
+#    font-weight: normal;
+#    color: #333333;
+#}
+#
+#/* Selected tab */
+#QTabBar::tab:selected {
+#    background: #ffffff;
+#    border: 1px solid #c2c7cb;
+#    border-bottom-color: #ffffff;
+#    font-weight: 500;
+#    color: #0078d7;
+#}
+#
+#/* Hovered tab */
+#QTabBar::tab:hover {
+#    background: #eaeaea;
+#}
+#
+#/* Disabled tab */
+#QTabBar::tab:!enabled {
+#    color: #999999;
+#}
+#
+#/* QLineEdit (for folder path) */
+#QLineEdit {
+#    background-color: #ffffff;
+#    border: 1px solid #ccc;
+#    border-radius: 4px;
+#    padding: 4px 6px;
+#}
+#
+#/* QTextEdit & QPlainTextEdit for logs */
+#QTextEdit, QPlainTextEdit {
+#    background-color: #ffffff;
+#    border: 1px solid #ccc;
+#    border-radius: 4px;
+#    padding: 6px;
+#    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
+#    font-size: 13px;
+#    color: #2d2d2d;
+#}
+#
+#/* QListWidget */
+#QListWidget {
+#    background-color: #ffffff;
+#    border: 1px solid #ccc;
+#    border-radius: 4px;
+#    padding: 2px;
+#}
+#QListWidget::item:selected {
+#    background-color: #a6d8fa; 
+#    color: black;
+#}
+#QListWidget::item:hover {
+#    background-color: #e6f7ff; 
+#}
+#
+#/* QProgressBar */
+#QProgressBar {
+#    background-color: #f0f0f0;
+#    border: 1px solid #bbb;
+#    border-radius: 6px;
+#    text-align: center;
+#    min-height: 20px;
+#    font: 13px 'Segoe UI', 'Ubuntu', 'Arial', sans-serif;
+#    color: #333;
+#    padding: 2px;
+#}
+#
+#QProgressBar::chunk {
+#    background-color: #0078d7;
+#    border-radius: 6px;
+#    margin: 0px;
+#}
+#""")
     config = AppConfig()
     window = PyMarAiGuiApp(config)
     window.show()
