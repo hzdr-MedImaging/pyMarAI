@@ -26,8 +26,7 @@ class UserCancelledError(Exception):
 class MarAiBase(ABC):
     def __init__(self, cfg_path, stop_event=None):
         # load config file
-        cfg_path = cfg_path or (
-            "C:\\pymarai\\pymarai.yml" if platform.system() == 'Windows' else "/usr/local/etc/pymarai.yml")
+        cfg_path = cfg_path or "/usr/local/etc/pymarai.yml"
         self.cfg = self._load_config(cfg_path)
 
         self.nnunet_v_output_dir = None
