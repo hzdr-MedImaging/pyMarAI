@@ -219,7 +219,7 @@ class PyMarAiGuiApp(QDialog):
         self.progressBarLabel = QLabel()
         self.progressBarLabel.hide()
         self.progressBar = QProgressBar()
-        self.progressBar.setFixedHeight(8)
+        self.progressBar.setFixedHeight(13)
         self.progressBar.setFixedWidth(300)
         self.progressBar.setMinimum(0)
         self.progressBar.setMaximum(100)
@@ -229,9 +229,8 @@ class PyMarAiGuiApp(QDialog):
         predictionRunLayout = QHBoxLayout(predictionRunWidget)
         predictionRunLayout.addWidget(self.predictionButton, alignment=Qt.AlignCenter)
         progressBarHLayout = QHBoxLayout()
-        predictionRunLayout.addStretch()
         progressBarHLayout.addWidget(self.progressBarLabel)
-        progressBarHLayout.addWidget(self.progressBar, alignment=Qt.AlignCenter)
+        progressBarHLayout.addWidget(self.progressBar)
         predictionRunLayout.addLayout(progressBarHLayout)
         predictionRunLayout.addStretch()
 
@@ -359,7 +358,7 @@ class PyMarAiGuiApp(QDialog):
         self.retrainProgressBarLabel = QLabel()
         self.retrainProgressBarLabel.hide()
         self.retrainProgressBar = QProgressBar()
-        self.retrainProgressBar.setFixedHeight(8)
+        self.retrainProgressBar.setFixedHeight(13)
         self.retrainProgressBar.setFixedWidth(300)
         self.retrainProgressBar.setRange(0, 100)
         self.retrainProgressBar.hide()
@@ -828,7 +827,7 @@ class PyMarAiGuiApp(QDialog):
 
     # callback for file loading errors
     def onFileLoadError(self, error_message):
-        self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction files: {error_message}.\n")
+        self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction files: {error_message.strip()}\n")
         self.imagePreviewLabel.setText("Failed to load images")
 
     # callback when prediction file loading is finished
@@ -1431,7 +1430,6 @@ class PyMarAiGuiApp(QDialog):
     # applies the selected mask style to the current prediction image
     def applyPredictionMask(self):
         if not self.previewList:
-            self.showProgressMessage("No images to process in the batch.")
             return
 
         self.setProgressBarText("Applying masks to all images...")
@@ -1466,7 +1464,6 @@ class PyMarAiGuiApp(QDialog):
 
     def applyRetrainMask(self):
         if not self.retrainPreviewList:
-            self.showProgressMessage("No retrain images to process.")
             return
 
         self.setRetrainProgressBarText("Applying retrain masks...")
@@ -1706,16 +1703,74 @@ class PyMarAiGuiApp(QDialog):
 
     def predictionButtonPressed(self):
         if not self.processingRunning:
-            # show login dialog for SSH credentials
-            login_dialog = login.LoginDialog(self)
-            if login_dialog.exec_() == QMessageBox.Accepted:  # Use QMessageBox.Accepted
-                username, password = login_dialog.get_credentials()
+            # check for already-analyzed files first
+            selected_items = self.inputFileListWidget.selectedItems()
+            if not selected_items:
+                self.update_progress_text_signal.emit("No files selected.\n")
+                return
 
-                if not username or not password:
-                    self.update_progress_text_signal.emit("Username or password cannot be empty.\n")
-                    QMessageBox.warning(self, "Login Error", "Username or password cannot be empty.")
+            selected_filenames = [self.cleanFilename(item.text()) for item in selected_items]
+            output_dir = self.outputFilePathTextEdit.text().strip()
+
+            already_analyzed = []
+            for filename in selected_filenames:
+                base = os.path.splitext(filename)[0]
+                v_path = os.path.join(output_dir, base + ".v")
+                rdf_path = os.path.join(output_dir, base + ".rdf")
+                if os.path.exists(v_path) and os.path.exists(rdf_path):
+                    already_analyzed.append(filename)
+
+            # ask user whether to include them
+            if already_analyzed:
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Question)
+                msg.setWindowTitle("Re-analyze Already Processed Files?")
+                msg.setText(f"{len(already_analyzed)} of the selected files have already been analyzed.\n"
+                            f"Do you want to include them for re-analysis?")
+                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                result = msg.exec_()
+
+                if result == QMessageBox.No:
+                    # Remove already analyzed files
+                    selected_filenames = [f for f in selected_filenames if f not in already_analyzed]
+
+                    if not selected_filenames:
+                        QMessageBox.information(self, "No Files to Process",
+                                                "All selected files were already analyzed.")
+                        return
+
+            # SSH key check and conditional login window
+            user_home = os.path.expanduser("~")
+            ssh_dir = os.path.join(user_home, ".ssh")
+            ssh_key_paths = [
+                os.path.join(ssh_dir, "id_rsa"),
+                os.path.join(ssh_dir, "id_ed25519"),
+            ]
+
+            ssh_key_exists = any(os.path.exists(p) for p in ssh_key_paths)
+
+            username = ""
+            password = ""
+            login_successful = False
+
+            if ssh_key_exists:
+                self.update_progress_text_signal.emit("SSH key found for user. Proceeding without password prompt.\n")
+                login_successful = True # Assume success if key exists
+            else:
+                self.update_progress_text_signal.emit("No SSH key found. Prompting for password via Login Window.\n")
+                login_dialog = login.LoginDialog(self)
+                if login_dialog.exec_() == QMessageBox.Accepted:
+                    username, password = login_dialog.get_credentials()
+                    if not username or not password:
+                        self.update_progress_text_signal.emit("Username or password cannot be empty.\n")
+                        QMessageBox.warning(self, "Login Error", "Username or password cannot be empty.")
+                        return
+                    login_successful = True
+                else:
+                    self.update_progress_text_signal.emit("[ERROR] Login cancelled.\n")
                     return
 
+            if login_successful:
                 # clear the progress output and prepare for job processing
                 self.progressPlainTextEdit.clear()
 
@@ -1741,16 +1796,12 @@ class PyMarAiGuiApp(QDialog):
                 self.predictionThread.start()
                 self.switchElementsToPrediction(True)
 
-            else:
-                self.update_progress_text_signal.emit("[ERROR] Login cancelled.\n")
-
         else:
             # we are running, so the button acts as "Stop"
             if self.predictionThread and self.predictionThread.isRunning():
                 self.update_progress_text_signal.emit("\n*** Aborting prediction ***\n")
-                # request termination of the process
                 self.predictionThread.stop_prediction_process()
-                # the finished signal will handle GUI cleanup
+
 
     # function to combine the selected parameters and actually
     # start the prediction by passing these parameters
@@ -2158,164 +2209,6 @@ class MaskBatchWorker(QThread):
 # main function to start GUI
 def main():
     app = QApplication(sys.argv)
-#    app.setStyleSheet("""
-#/* Global Font */
-#* {
-#    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
-#    font-size: 14px;
-#}
-#
-#/* QPushButton */
-#QPushButton {
-#    background-color: #0078d7;
-#    color: white;
-#    border: none;
-#    border-radius: 5px;
-#    padding: 4px 10px;
-#}
-#QPushButton:hover {
-#    background-color: #005fa3;
-#}
-#QPushButton:pressed {
-#    background-color: #004e8c;
-#}
-#QPushButton:disabled {
-#    background-color: #cccccc;
-#    color: #666666;
-#}
-#
-#/* QLabel */
-#QLabel {
-#    color: #2e2e2e;    font-weight: normal;
-#}
-#
-#/* QComboBox */
-#QComboBox {
-#    background-color: #ffffff;
-#    border: 1px solid #cccccc;
-#    border-radius: 6px;
-#    padding: 4px 6px;
-#    selection-background-color: #0078d7;
-#}
-#QComboBox::drop-down {
-#    border: none;
-#}
-#
-#/* QGroupBox */
-#QGroupBox {
-#        border: 1px solid #cccccc;
-#        border-radius: 8px;
-#        margin-top: 10px;
-#        background-color: #f9f9f9;
-#        padding: 10px;
-#    }
-#    QGroupBox:title {
-#        subcontrol-origin: margin;
-#        left: 10px;
-#        padding: 0 3px 0 3px;
-#    }
-#
-#/* QTabWidget */
-#QTabWidget::pane {
-#    border: 1px solid #c2c7cb;
-#    border-top: none;  
-#    border-bottom-left-radius: 6px;
-#    border-bottom-right-radius: 6px;
-#    background: #ffffff;
-#    padding: 6px;
-#    margin-top: -1px; 
-#}
-#
-#/* Tab Bar alignment */
-#QTabWidget::tab-bar {
-#    left: 0px;
-#}
-#
-#/* QTabBar Tabs */
-#QTabBar::tab {
-#    background: #f5f5f5;
-#    border: 1px solid #c2c7cb;
-#    border-bottom: none;
-#    border-top-left-radius: 8px;
-#    border-top-right-radius: 8px;
-#    min-width: 100px;
-#    padding: 8px 16px;
-#    margin-right: 1px;
-#    font-weight: normal;
-#    color: #333333;
-#}
-#
-#/* Selected tab */
-#QTabBar::tab:selected {
-#    background: #ffffff;
-#    border: 1px solid #c2c7cb;
-#    border-bottom-color: #ffffff;
-#    font-weight: 500;
-#    color: #0078d7;
-#}
-#
-#/* Hovered tab */
-#QTabBar::tab:hover {
-#    background: #eaeaea;
-#}
-#
-#/* Disabled tab */
-#QTabBar::tab:!enabled {
-#    color: #999999;
-#}
-#
-#/* QLineEdit (for folder path) */
-#QLineEdit {
-#    background-color: #ffffff;
-#    border: 1px solid #ccc;
-#    border-radius: 4px;
-#    padding: 4px 6px;
-#}
-#
-#/* QTextEdit & QPlainTextEdit for logs */
-#QTextEdit, QPlainTextEdit {
-#    background-color: #ffffff;
-#    border: 1px solid #ccc;
-#    border-radius: 4px;
-#    padding: 6px;
-#    font-family: 'Segoe UI', 'Ubuntu', 'Arial';
-#    font-size: 13px;
-#    color: #2d2d2d;
-#}
-#
-#/* QListWidget */
-#QListWidget {
-#    background-color: #ffffff;
-#    border: 1px solid #ccc;
-#    border-radius: 4px;
-#    padding: 2px;
-#}
-#QListWidget::item:selected {
-#    background-color: #a6d8fa; 
-#    color: black;
-#}
-#QListWidget::item:hover {
-#    background-color: #e6f7ff; 
-#}
-#
-#/* QProgressBar */
-#QProgressBar {
-#    background-color: #f0f0f0;
-#    border: 1px solid #bbb;
-#    border-radius: 6px;
-#    text-align: center;
-#    min-height: 20px;
-#    font: 13px 'Segoe UI', 'Ubuntu', 'Arial', sans-serif;
-#    color: #333;
-#    padding: 2px;
-#}
-#
-#QProgressBar::chunk {
-#    background-color: #0078d7;
-#    border-radius: 6px;
-#    margin: 0px;
-#}
-#""")
     config = AppConfig()
     window = PyMarAiGuiApp(config)
     window.show()
