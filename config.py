@@ -7,7 +7,7 @@ class AppConfig:
             if os.name == 'nt':
                 path = "C:\\pymarai\\pymarai.yml"
             else:
-                path = os.path.expanduser("/home/melnyk80/PycharmProjects/PythonProject/pymarai.yml")
+                path = os.path.expanduser("/usr/local/etc/pymarai.yml")
 
         with open(path, 'r') as f:
             self.config = yaml.safe_load(f)

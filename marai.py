@@ -27,7 +27,7 @@ class MarAiBase(ABC):
     def __init__(self, cfg_path, stop_event=None):
         # load config file
         cfg_path = cfg_path or (
-            "C:\\pymarai\\pymarai.yml" if platform.system() == 'Windows' else "/home/melnyk80/PycharmProjects/PythonProject/pymarai.yml")
+            "C:\\pymarai\\pymarai.yml" if platform.system() == 'Windows' else "/usr/local/etc/pymarai.yml")
         self.cfg = self._load_config(cfg_path)
 
         self.nnunet_v_output_dir = None
@@ -95,7 +95,7 @@ class MarAiBase(ABC):
         folds_str = ' '.join(map(str, folds))
 
         return (
-            f"conda run -n {env} --live-stream nnUNetv2_predict "
+            f"/usr/local/miniforge3/condabin/conda run -n {env} --live-stream nnUNetv2_predict "
             f"-d {dataset} -i {input_dir} -o {output_dir} "
             f"-f {folds_str} -tr {trainer} -c {config} -p {plans}"
         )
