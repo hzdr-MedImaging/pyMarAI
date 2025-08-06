@@ -356,7 +356,9 @@ class MarAiRemote(MarAiBase):
         self.tempId = f"{os.getpid()}-{threading.get_ident()}"
 
         self.connected = False
+        self.pkey = paramiko.RSAKey.from_private_key_file(os.path.expanduser('~/.ssh/id_rsa'))
         self.ssh = paramiko.SSHClient()
+        self.ssh.load_system_host_keys()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.sftp = None
 
@@ -393,7 +395,7 @@ class MarAiRemote(MarAiBase):
     def connect(self):
         if not self.connected:
             logger.info(f"[INFO] Connecting to remote host {self.hostname}...")
-            self.ssh.connect(self.hostname, username=self.username, password=self.password)
+            self.ssh.connect(self.hostname, username=self.username, password=self.password, allow_agent=True, pkey=self.pkey)
             self.sftp = self.ssh.open_sftp()
             self.connected = True
             logger.info("[INFO] Successfully connected.")
@@ -412,7 +414,10 @@ class MarAiRemote(MarAiBase):
                     logger.warning(f"[ERROR] Error closing SSH client: {e}")
         self.connected = False
         self.sftp = None
-        self.ssh = paramiko.SSHClient() # reinitialize for next connection
+
+        # reinit ssh client for next connection
+        self.ssh = paramiko.SSHClient()
+        self.ssh.load_system_host_keys()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     # run command remotely and stream output (now can signal completion)
