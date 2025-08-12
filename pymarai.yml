@@ -34,3 +34,47 @@ machines:
       ip: 149.220.74.204
       cpu: false
       gpu: true
+  atlas:
+      ip: 149.220.74.144
+      cpu: true
+      gpu: false
+  janus:
+      ip: 149.220.74.146
+      cpu: true
+      gpu: false
+  hati:
+      ip: 149.220.74.154
+      cpu: true
+      gpu: false
+  kari:
+      ip: 149.220.74.156
+      cpu: true
+      gpu: false
+  anthe:
+      ip: 149.220.74.158
+      cpu: true
+      gpu: false
+  pan:
+      ip: 149.220.74.161
+      cpu: true
+      gpu: false
+  orcus:
+      ip: 149.220.74.136
+      cpu: true
+      gpu: false
+  proteus:
+      ip: 149.220.74.142
+      cpu: true
+      gpu: false
+  narvi:
+      ip: 149.220.74.148
+      cpu: true
+      gpu: false
+  jupiter:
+      ip: 149.220.74.134
+      cpu: true
+      gpu: false
+  neptun:
+      ip: 149.220.74.63
+      cpu: true
+      gpu: false
