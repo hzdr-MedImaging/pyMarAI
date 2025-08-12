@@ -12,15 +12,17 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import csv
+import re
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe
 
 from config import AppConfig
 
-from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout,
-                             QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit,
-                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog)
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QTableWidgetItem,
+                             QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
+                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip)
 
 from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool
@@ -49,9 +51,10 @@ class PyMarAiGuiApp(QDialog):
 
         self.settings = QSettings("PyMarAi", "PyMarAiGuiApp")
         self.selectedInputDirectory = self.settings.value("lastInputDir", os.getcwd())
-        self.lastOutputDirectory = self.settings.value("lastOutputDir", os.getcwd())
         self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", os.getcwd())
         self.lastRetrainOutputDirectory = self.settings.value("lastRetrainOutputDir", os.getcwd())
+
+        self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, ".marai_output")
 
         self.previewList = []
         self.retrainPreviewList = []
@@ -62,6 +65,8 @@ class PyMarAiGuiApp(QDialog):
         self.fileLoader = None
         self.processingRunning = False
         self.outputBasenames = set()
+
+        self.file_status = {}  # stores "good", "bad", or None
 
         self.thread_pool = QThreadPool.globalInstance()
         self.current_preview_filename = None
@@ -89,6 +94,8 @@ class PyMarAiGuiApp(QDialog):
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
         self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
+        self.tab_widget.currentChanged.connect(self.onTabChanged)
+
         self.setupPredictionTab()
         self.setupRetrainTab()
 
@@ -108,13 +115,11 @@ class PyMarAiGuiApp(QDialog):
         self.inputDirButton = self.createButton("Browse", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
-        self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
 
         inputFilePathButtonsLayout = QHBoxLayout()
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
-        inputFilePathButtonsLayout.addWidget(self.openRoverButton)
         inputFilePathButtonsLayout.addStretch()
 
         self.inputFileListWidget = QListWidget()
@@ -145,8 +150,14 @@ class PyMarAiGuiApp(QDialog):
         self.imageFilenameLabel = self.createLabel("No file selected")
         self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
 
-        self.prevButton = self.createButton("Previous", self.showPreviousImage)
-        self.nextButton = self.createButton("Next", self.showNextImage)
+        self.prevButton = self.createButton("↑ Previous", self.showPreviousImage)
+        self.nextButton = self.createButton("Next ↓", self.showNextImage)
+        self.markGoodButton = self.createButton("→ Mark as GOOD", self.markFileAsGood)
+        self.markGoodButton.setToolTip(
+            "Marks the currently selected file as GOOD result of prediction. This action can also be triggered by pushing right arrow ->.")
+        self.markBadButton = self.createButton("Mark as BAD ←", self.markFileAsBad)
+        self.markBadButton.setToolTip(
+            "Marks the currently selected file as BAD result of prediction. This action can also be triggered by pushing left arrow <-.")
 
         imagePreviewContainerWidget = QWidget()
         imagePreviewContainerLayout = QVBoxLayout(imagePreviewContainerWidget)
@@ -158,6 +169,8 @@ class PyMarAiGuiApp(QDialog):
         prevNextButtonsHLayout.addStretch()
         prevNextButtonsHLayout.addWidget(self.prevButton)
         prevNextButtonsHLayout.addWidget(self.nextButton)
+        prevNextButtonsHLayout.addWidget(self.markGoodButton)
+        prevNextButtonsHLayout.addWidget(self.markBadButton)
         prevNextButtonsHLayout.addStretch()
         imagePreviewContainerLayout.addLayout(prevNextButtonsHLayout)
 
@@ -178,18 +191,33 @@ class PyMarAiGuiApp(QDialog):
         maskControlsVLayout.addLayout(maskButtonsHLayout)
         maskControlsVLayout.addWidget(mask_options_group_box)
 
-        # --- Output File Section ---
-        self.outputFileLabel = self.createLabel("Output Folder:")
-        self.outputFilePathTextEdit = self.createTextEdit()
-        self.outputFilePathSelectButton = self.createButton("Browse", self.outputDirSelect)
+        # --- Analysed Files Toolbox ---
+        self.statusToolsGroup = QGroupBox("Status Tools")
+        self.statusToolsGroup.setCheckable(True)
+        self.statusToolsGroup.setChecked(True)
 
-        outputFilePathLayout = QHBoxLayout()
-        outputFilePathLayout.addWidget(self.outputFileLabel)
-        outputFilePathLayout.addWidget(self.outputFilePathTextEdit)
-        outputFilePathLayout.addWidget(self.outputFilePathSelectButton)
+        self.selectAllGoodButton = self.createButton("Select all GOOD", self.selectAllGoodFiles)
+        self.selectAllBadButton = self.createButton("Select all BAD", self.selectAllBadFiles)
+        self.selectAllUntaggedButton = self.createButton("Select All Untagged", self.selectAllUntaggedFiles)
+        self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
+        self.openRoverButton.setToolTip(
+            "Opens all currently selected files in the ROVER application. It can also be triggered by double-clicking the file of interest.")
+        self.saveOutputButton = self.createButton("Export Results", self.saveSelectedOutputs)
+        self.saveOutputButton.setToolTip(
+            "Saves the selected output files (.v and .rdf) to the user-selected directory.")
+        self.generateStatsButton = self.createButton("Generate Stats", self.generateStatisticsTable)
+        self.generateStatsButton.setToolTip(
+            "Generates a statistics table for all selected files that are marked as 'GOOD'.")
 
-        outputFilePathWidget = QWidget()
-        outputFilePathWidget.setLayout(outputFilePathLayout)
+        statusToolsWidget = QWidget()
+        statusToolsLayout = QHBoxLayout(statusToolsWidget)
+        statusToolsLayout.addWidget(self.selectAllGoodButton)
+        statusToolsLayout.addWidget(self.selectAllBadButton)
+        statusToolsLayout.addWidget(self.selectAllUntaggedButton)
+        statusToolsLayout.addWidget(self.openRoverButton)
+        statusToolsLayout.addWidget(self.saveOutputButton)
+        statusToolsLayout.addWidget(self.generateStatsButton)
+        statusToolsLayout.addStretch()
 
         # --- Microscope Selection ---
         self.microscopeLabel = self.createLabel("Microscope:")
@@ -201,16 +229,11 @@ class PyMarAiGuiApp(QDialog):
 
         microscopeLayout = QHBoxLayout()
         microscopeLayout.addWidget(self.microscopeLabel)
-        microscopeLayout.setSpacing(23)
         microscopeLayout.addWidget(self.microscopeComboBox)
+        microscopeLayout.addStretch()
 
         microscopeWidget = QWidget()
         microscopeWidget.setLayout(microscopeLayout)
-
-        # --- Combine Output Folder + Microscope Selection ---
-        outputAndMicroscopeLayout = QHBoxLayout()
-        outputAndMicroscopeLayout.addWidget(outputFilePathWidget, stretch=3)
-        outputAndMicroscopeLayout.addWidget(microscopeWidget, stretch=1)
 
         # --- Prediction Button, Progress Bar, and Progress Label (Grouped) ---
         self.predictionButton = self.createButton("Run Prediction", self.predictionButtonPressed)
@@ -252,7 +275,10 @@ class PyMarAiGuiApp(QDialog):
         prediction_tab_layout.addWidget(maskControlsVWidget, current_row, 3, 1, 1, Qt.AlignRight | Qt.AlignTop)
 
         current_row += 1
-        prediction_tab_layout.addLayout(outputAndMicroscopeLayout, current_row, 0, 1, 3)
+        prediction_tab_layout.addWidget(statusToolsWidget, current_row, 0, 1, 3)
+
+        current_row += 1
+        prediction_tab_layout.addWidget(microscopeWidget, current_row, 0)
 
         current_row += 1
         prediction_tab_layout.addWidget(predictionRunWidget, current_row, 0, 1, 2)
@@ -505,9 +531,6 @@ class PyMarAiGuiApp(QDialog):
     def initElements(self):
         self.enableWidgets(True)
 
-        if os.path.isdir(self.lastOutputDirectory):
-            self.outputFilePathTextEdit.insert(self.lastOutputDirectory)
-
         if os.path.isdir(self.lastRetrainOutputDirectory):
             self.retrainOutputFilePathTextEdit.insert(self.lastRetrainOutputDirectory)
 
@@ -521,6 +544,8 @@ class PyMarAiGuiApp(QDialog):
         self.removeMaskButton.setEnabled(False)
         self.retrainApplyMaskButton.setEnabled(False)
         self.retrainRemoveMaskButton.setEnabled(False)
+        self.markGoodButton.setEnabled(False)
+        self.markBadButton.setEnabled(False)
 
         # update prediction color buttons
         self.prediction_contour_color_button.setStyleSheet(f"background-color: {self.prediction_contour_color.name()};")
@@ -540,9 +565,7 @@ class PyMarAiGuiApp(QDialog):
     def enableWidgets(self, enable):
         # prediction tab widgets
         self.inputFileListWidget.setEnabled(enable)
-        self.outputFilePathTextEdit.setEnabled(enable)
         self.inputDirButton.setEnabled(enable)
-        self.outputFilePathSelectButton.setEnabled(enable)
         self.microscopeComboBox.setEnabled(enable)
         self.selectAllButton.setEnabled(enable)
         self.deselectAllButton.setEnabled(enable)
@@ -558,6 +581,9 @@ class PyMarAiGuiApp(QDialog):
         self.prediction_gradient_colormap_combo.setEnabled(enable and self.prediction_gradient_checkbox.isChecked())
         self.prediction_filled_color_button.setEnabled(enable and self.prediction_filled_checkbox.isChecked())
         self.prediction_contour_color_button.setEnabled(enable and self.prediction_contour_checkbox.isChecked())
+
+        self.markGoodButton.setEnabled(enable and self.current_preview_filename is not None)
+        self.markBadButton.setEnabled(enable and self.current_preview_filename is not None)
 
         # re-training tab widgets
         self.retrainInputFileListWidget.setEnabled(enable)
@@ -672,19 +698,6 @@ class PyMarAiGuiApp(QDialog):
                 else:
                     self.applyRetrainMask()
 
-    # opens a dialog to select the output directory for predictions
-    def outputDirSelect(self):
-        dir = QFileDialog.getExistingDirectory(self, 'Select a prediction output folder:')
-        if dir != "":
-            self.outputFilePathTextEdit.clear()
-            self.outputFilePathTextEdit.insert(dir)
-            self.settings.setValue("lastOutputDir", dir)
-
-            self.updateOutputBasenames()
-
-            if self.inputFileListWidget.count() > 0:
-                self.markAnalyzedFiles()
-
     # opens a dialog to select the output directory for re-training
     def retrainOutputDirSelect(self):
         dir = QFileDialog.getExistingDirectory(self, 'Select a re-training output folder:')
@@ -693,38 +706,61 @@ class PyMarAiGuiApp(QDialog):
             self.retrainOutputFilePathTextEdit.insert(dir)
             self.settings.setValue("lastRetrainOutputDir", dir)
 
- # updates the set of basenames for analyzed files in the output directory
+    # updates the set of basenames for analyzed files in the output directory
     def updateOutputBasenames(self):
         self.outputBasenames = set()
-        output_dir = self.outputFilePathTextEdit.text().strip()
+        output_dir = self.hiddenOutputDir
         if os.path.isdir(output_dir):
-            self.outputBasenames = {
-                os.path.splitext(f)[0]
-                for f in os.listdir(output_dir)
-                if os.path.isfile(os.path.join(output_dir, f))
-            }
+            for f in os.listdir(output_dir):
+                fp = os.path.join(output_dir, f)
+                if not os.path.isfile(fp):
+                    continue
+                base_no_ext = os.path.splitext(f)[0]
+                base_without_status, _ = self.parseStatusFromFilename(base_no_ext)
+                self.outputBasenames.add(base_without_status)
 
     # marks files in the input list that have already been analyzed
     def markAnalyzedFiles(self):
-        output_dir = self.outputFilePathTextEdit.text().strip()
-
+        output_dir = self.hiddenOutputDir
         for i in range(self.inputFileListWidget.count()):
             item = self.inputFileListWidget.item(i)
-            original_text = item.text().split(" [")[0].strip()
-            base = os.path.splitext(original_text)[0]
+            full_path = item.data(Qt.UserRole)
+            base_name = os.path.splitext(os.path.basename(full_path))[0]
 
-            # in MarAi, .v and .rdf are produced in the output directory
-            v_path = os.path.join(output_dir, base + ".v")
-            rdf_path = os.path.join(output_dir, base + ".rdf")
+            if base_name in self.outputBasenames:
+                status_found = None
+                if os.path.isdir(output_dir):
+                    for f in os.listdir(output_dir):
+                        fp = os.path.join(output_dir, f)
+                        if not os.path.isfile(fp):
+                            continue
+                        f_base, f_status = self.parseStatusFromFilename(os.path.splitext(f)[0])
+                        if f_base == base_name and f_status:
+                            status_found = f_status
+                            break
 
-            if os.path.exists(v_path) and os.path.exists(rdf_path):
-                item.setText(original_text + " [✓]")
-                item.setForeground(QBrush(QColor("#A9A9A9")))
+                if not status_found:
+                    status_found = "TO DO"
+
+                if status_found:
+                    self.file_status[full_path] = status_found
+                    item.setText(f"{os.path.basename(full_path)} [{status_found}]")
+                    if status_found == "GOOD":
+                        item.setForeground(QBrush(QColor("green")))
+                    elif status_found == "BAD":
+                        item.setForeground(QBrush(QColor("red")))
+                    elif status_found == "TO DO":
+                        item.setForeground(QBrush(QColor("orange")))
+                    else:
+                        item.setForeground(QBrush(QColor("#A9A9A9")))
             else:
-                item.setText(original_text)
+                item.setText(os.path.basename(full_path))
                 item.setForeground(Qt.black)
 
-    # removes the '[✓]' suffix from a filename string
+        if self.inputFileListWidget.selectedItems():
+            self.updatePreviewList()
+
+    # removes the suffix from a filename string
     def cleanFilename(self, text):
         return text.split(" [")[0].strip()
 
@@ -734,8 +770,12 @@ class PyMarAiGuiApp(QDialog):
         if dir_path:
             self.settings.setValue("lastInputDir", dir_path)
             self.loadFilesFromDirectory(dir_path)
+            self.hiddenOutputDir = os.path.join(dir_path, ".marai_output")
+            os.makedirs(self.hiddenOutputDir, exist_ok=True)
+            self.updatePreviewList()
+            self.updateOutputBasenames()
 
-    # opens a dialog to select the input directory for re-training
+            # opens a dialog to select the input directory for re-training
     def loadRetrainInputDirectory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Re-training Input Folder")
         if dir_path:
@@ -749,6 +789,8 @@ class PyMarAiGuiApp(QDialog):
         self.inputFileListWidget.clear()
         self.setProgressBarText("Loading files...")
         self.previewList = []
+
+        self.file_status = {}
 
         self.processingRunning = True
         self.enableWidgets(False)
@@ -783,9 +825,13 @@ class PyMarAiGuiApp(QDialog):
         self.inputFileListWidget.clearSelection()
 
         for file in file_list:
-            item = QListWidgetItem(file)
+            full_path = os.path.join(dir_path, file)
+            display_name = os.path.basename(file)
+            item = QListWidgetItem(display_name)
+            item.setData(Qt.UserRole, full_path)
             self.inputFileListWidget.addItem(item)
 
+        self.updateOutputBasenames()
         self.markAnalyzedFiles()
 
         if file_list:
@@ -800,7 +846,8 @@ class PyMarAiGuiApp(QDialog):
             self.imageFilenameLabel.setText("")
 
         self.update_progress_text_signal.emit(
-            f"Found {len(file_list)} compatible prediction files.\n")
+            f"Found {len(file_list)} compatible prediction files.\n"
+        )
 
     # callback when re-training files are loaded by the worker
     def onRetrainFilesLoaded(self, file_list, dir_path):
@@ -854,13 +901,31 @@ class PyMarAiGuiApp(QDialog):
         self.imageFilenameLabel.setText("No file selected")
 
         if items:
-            self.previewList = [self.cleanFilename(item.text()) for item in items]
+            # get the full paths of all selected items
+            self.previewList = [item.data(Qt.UserRole) for item in items]
             self.previewIndex = 0
+
+            # get the full path and filename of the first selected item for preview
+            full_path = self.previewList[0]
+            self.current_preview_filename = full_path
+
+            # check the status of the single currently previewed file
+            status = self.file_status.get(full_path)
+            has_status = status in ("TO DO", "GOOD", "BAD")
+
+            # enable the GOOD/BAD buttons only if the specific file being previewed has a prediction
+            self.markGoodButton.setEnabled(has_status)
+            self.markBadButton.setEnabled(has_status)
+
+            # show the first image in the selection
             self.showImageAtIndex(self.previewIndex)
         else:
+            # handle case where no files are selected
             self.previewList = []
             self.applyMaskButton.setEnabled(False)
             self.removeMaskButton.setEnabled(False)
+            self.markGoodButton.setEnabled(False)
+            self.markBadButton.setEnabled(False)
 
     # updates the re-training preview list based on selected items
     def updateRetrainPreviewList(self):
@@ -1008,9 +1073,11 @@ class PyMarAiGuiApp(QDialog):
             self.imagePreviewLabel.setText("No files selected")
             return
 
-        filename = self.previewList[index]
+        full_input_path = self.previewList[index]
+        filename = os.path.basename(full_input_path)
         self.imageFilenameLabel.setText(filename)
-        full_input_path = os.path.join(self.selectedInputDirectory, filename)
+
+        self.current_preview_filename = full_input_path
 
         # reset state
         self.applyMaskButton.setEnabled(False)
@@ -1019,7 +1086,6 @@ class PyMarAiGuiApp(QDialog):
         self.imagePreviewLabel.setText("Loading...")
 
         try:
-            # load and convert image
             image = Image.open(full_input_path)
             image = ImageOps.exif_transpose(image)
             if image.mode != "RGB":
@@ -1027,28 +1093,22 @@ class PyMarAiGuiApp(QDialog):
 
             self.originalPredictionImage = image
 
-            # Check if we have a masked pixmap cached
-            if filename in self.predictionMaskedPixmaps:
-                pixmap = self.predictionMaskedPixmaps[filename]
+            if full_input_path in self.predictionMaskedPixmaps:
+                pixmap = self.predictionMaskedPixmaps[full_input_path]
             else:
-                # Convert PIL to QPixmap if no mask
                 qimg = QImage(image.tobytes("raw", "RGB"),
                               image.width, image.height,
                               QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimg)
 
-            # scale image height to 600px and compute new width
             fixed_height = 600
             aspect_ratio = pixmap.width() / pixmap.height()
             new_width = int(fixed_height * aspect_ratio)
 
-            # resize label accordingly
             self.imagePreviewLabel.setFixedSize(new_width, fixed_height)
 
-            # scale the pixmap
             scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-            # create rounded pixmap
             rounded_pixmap = QPixmap(scaled_pixmap.size())
             rounded_pixmap.fill(Qt.transparent)
 
@@ -1064,17 +1124,13 @@ class PyMarAiGuiApp(QDialog):
             self.imagePreviewLabel.setPixmap(rounded_pixmap)
             self.imagePreviewLabel.setText("")
 
-            # enable/disable buttons based on mask state
-            if filename in self.predictionMaskedPixmaps:
+            if self.current_preview_filename in self.predictionMaskedPixmaps:
                 self.applyMaskButton.setEnabled(False)
                 self.removeMaskButton.setEnabled(True)
             else:
                 self.removeMaskButton.setEnabled(False)
-                for i in range(self.inputFileListWidget.count()):
-                    item = self.inputFileListWidget.item(i)
-                    if self.cleanFilename(item.text()) == filename and "[✓]" in item.text():
-                        self.applyMaskButton.setEnabled(True)
-                        break
+                is_analyzed = self.file_status.get(self.current_preview_filename) in ("TO DO", "GOOD", "BAD")
+                self.applyMaskButton.setEnabled(is_analyzed)
 
         except Exception as e:
             self.imagePreviewLabel.setText("Failed to load image.\n")
@@ -1082,6 +1138,8 @@ class PyMarAiGuiApp(QDialog):
             self.originalPredictionImage = None
             self.applyMaskButton.setEnabled(False)
             self.removeMaskButton.setEnabled(False)
+            self.markGoodButton.setEnabled(False)
+            self.markBadButton.setEnabled(False)
 
     # displays the image at the given index in the re-training preview
     def showRetrainImageAtIndex(self, index):
@@ -1101,11 +1159,11 @@ class PyMarAiGuiApp(QDialog):
         self.originalRetrainImage = None
 
         try:
-            # ✅ Check if a masked pixmap is already cached
+            # check if a masked pixmap is already cached
             if filename_base in self.retrainMaskedPixmaps:
                 pixmap = self.retrainMaskedPixmaps[filename_base]
 
-                # Resize image height to 600px and calculate width proportionally
+                # resize image height to 600px and calculate width proportionally
                 fixed_height = 600
                 aspect_ratio = pixmap.width() / pixmap.height()
                 new_width = int(fixed_height * aspect_ratio)
@@ -1114,7 +1172,7 @@ class PyMarAiGuiApp(QDialog):
 
                 scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-                # Apply rounded corners
+                # apply rounded corners
                 rounded_pixmap = QPixmap(scaled_pixmap.size())
                 rounded_pixmap.fill(Qt.transparent)
 
@@ -1131,9 +1189,9 @@ class PyMarAiGuiApp(QDialog):
                 self.retrainImagePreviewLabel.setText("")
                 self.retrainApplyMaskButton.setEnabled(False)
                 self.retrainRemoveMaskButton.setEnabled(True)
-                return  # ✅ Exit early if mask is shown
+                return
 
-            # If no cached mask, load the original V file
+            # if no cached mask, load the original V file
             if not os.path.exists(v_file_path):
                 raise FileNotFoundError(f".v file not found: {v_file_path}")
 
@@ -1153,16 +1211,16 @@ class PyMarAiGuiApp(QDialog):
             if original_image_pil.mode != 'RGB':
                 original_image_pil = original_image_pil.convert('RGB')
 
-            self.originalRetrainImage = original_image_pil  # Store PIL Image
+            self.originalRetrainImage = original_image_pil
 
-            # Convert PIL to QPixmap
+            # convert PIL to QPixmap
             qimg = QImage(self.originalRetrainImage.tobytes("raw", "RGB"),
                           self.originalRetrainImage.width,
                           self.originalRetrainImage.height,
                           QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimg)
 
-            # Resize image height to 600px and calculate width proportionally
+            # resize image height to 600px and calculate width proportionally
             fixed_height = 600
             aspect_ratio = pixmap.width() / pixmap.height()
             new_width = int(fixed_height * aspect_ratio)
@@ -1171,7 +1229,7 @@ class PyMarAiGuiApp(QDialog):
 
             scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-            # Apply rounded corners
+            # apply rounded corners
             rounded_pixmap = QPixmap(scaled_pixmap.size())
             rounded_pixmap.fill(Qt.transparent)
 
@@ -1196,18 +1254,41 @@ class PyMarAiGuiApp(QDialog):
             self.retrainRemoveMaskButton.setEnabled(False)
 
     # generates the CNN mask using thrass and overlays it on the original image based on the selected mask style
-    def process_single_image_and_mask(self, filename, input_dir, output_dir, mask_settings, signals):
-        full_input_path = os.path.join(input_dir, filename)
-        base_name, _ = os.path.splitext(filename)
-        v_file_path_in_output = os.path.join(output_dir, base_name + ".v")
-        generated_mask_path = os.path.join(output_dir, base_name + "_cnn.v")
+    def process_single_image_and_mask(self, filename, input_dir, mask_settings, signals):
 
-        # This is a blocking operation, but it's safe here because it's in a worker thread.
+        if os.path.isabs(filename) and os.path.exists(filename):
+            full_input_path = filename
+        else:
+            full_input_path = os.path.join(input_dir, os.path.basename(filename))
+
+        base_name = os.path.splitext(os.path.basename(full_input_path))[0]
+
+        # find matching .v file in the output directory
+        if not os.path.isdir(self.hiddenOutputDir):
+            raise FileNotFoundError(f"Output directory not found: {self.hiddenOutputDir}")
+
+        pattern = re.compile(rf"^{re.escape(base_name)}(_(GOOD|BAD|TO DO))?(_m\d+)?\.v$", re.IGNORECASE)
+        matching_files = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
+
+        if not matching_files:
+            raise FileNotFoundError(f"No matching .v file found for {base_name} in {self.hiddenOutputDir}")
+
+        # sort files by modification time to get the latest one
+        matching_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
+
+        matched_v_file = matching_files[0]
+        v_file_path_in_output = os.path.join(self.hiddenOutputDir, matched_v_file)
+        matched_base = os.path.splitext(matched_v_file)[0]
+
+        generated_mask_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn.v")
+
+        # load the original image
         original_image_pil = Image.open(full_input_path)
         original_image_pil = ImageOps.exif_transpose(original_image_pil)
         if original_image_pil.mode != "RGB":
             original_image_pil = original_image_pil.convert("RGB")
 
+        # prepare cache directory
         try:
             v_file_mtime = os.path.getmtime(v_file_path_in_output)
             v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
@@ -1217,17 +1298,18 @@ class PyMarAiGuiApp(QDialog):
 
         cache_dir = "/tmp/marai_cnn_masks_prediction"
         os.makedirs(cache_dir, exist_ok=True)
-        cached_mask_name = f"{base_name}_{v_file_timestamp}_cnn.v"
+        cached_mask_name = f"{matched_base}_{v_file_timestamp}_cnn.v"
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
 
+        # check cache or generate mask
         if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
-            signals.progress_message.emit(f"[INFO] Using cached mask for {filename}\n")
+            signals.progress_message.emit(f"[INFO] Using cached mask for {matched_v_file}\n")
             mask_file_to_use = cached_mask_path
         else:
-            signals.progress_message.emit(f"Running thrass for {filename} mask generation...\n")
-            thrass_command = ["thrass", "-t", "cnnPrepare", "-b", os.path.basename(v_file_path_in_output)]
+            signals.progress_message.emit(f"Running thrass for {matched_v_file} mask generation...\n")
+            thrass_command = ["thrass", "-t", "cnnPrepare", "-b", matched_v_file]
             env = os.environ.copy()
-            result = subprocess.run(thrass_command, capture_output=True, text=True, cwd=output_dir, env=env)
+            result = subprocess.run(thrass_command, capture_output=True, text=True, cwd=self.hiddenOutputDir, env=env)
 
             signals.progress_message.emit(f"Thrass stdout:\n{result.stdout}\n")
             if result.stderr:
@@ -1235,6 +1317,7 @@ class PyMarAiGuiApp(QDialog):
             if result.returncode != 0:
                 raise RuntimeError(f"Thrass failed with exit code {result.returncode}")
 
+            # wait for generated mask
             wait_time = 0
             while not os.path.exists(generated_mask_path) and wait_time < 5:
                 time.sleep(0.5)
@@ -1245,14 +1328,16 @@ class PyMarAiGuiApp(QDialog):
             shutil.copy2(generated_mask_path, cached_mask_path)
             mask_file_to_use = cached_mask_path
 
-            for fname in os.listdir(output_dir):
-                if fname.startswith(base_name + "_cnn") and fname.endswith(".v"):
+            # clean up Thrass output files
+            for fname in os.listdir(self.hiddenOutputDir):
+                if fname.startswith(matched_base + "_cnn") and fname.endswith(".v"):
                     try:
-                        os.remove(os.path.join(output_dir, fname))
+                        os.remove(os.path.join(self.hiddenOutputDir, fname))
                         signals.progress_message.emit(f"[INFO] Deleted Thrass output file: {fname}\n")
                     except Exception as e:
                         signals.progress_message.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
 
+        # load mask data
         mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
         if mask_data.max() > mask_data.min():
             normalized_mask = ((mask_data - mask_data.min()) / (mask_data.max() - mask_data.min()) * 255).astype(
@@ -1266,6 +1351,7 @@ class PyMarAiGuiApp(QDialog):
 
         combined_image_pil = original_image_pil.convert('RGBA')
 
+        # apply mask styles
         if mask_settings['show_gradient']:
             combined_image_pil = self.create_gradient_mask_overlay(
                 combined_image_pil, mask_pil, colormap_name=mask_settings['gradient_colormap'], alpha=150)
@@ -1285,7 +1371,7 @@ class PyMarAiGuiApp(QDialog):
         return QPixmap.fromImage(qimg)
 
     # generates the CNN mask for re-training data and overlays it on the original .v image
-    def process_single_image_and_mask_retrain(self, filename, input_dir, output_dir, mask_settings, signals=None):
+    def process_single_image_and_mask_retrain(self, filename, input_dir, mask_settings, signals=None):
         base_name, _ = os.path.splitext(filename)
         v_filename = base_name + ".v"
         v_file_path = os.path.join(input_dir, v_filename)
@@ -1399,8 +1485,15 @@ class PyMarAiGuiApp(QDialog):
         if tab_type == "prediction":
             self.predictionMaskedPixmaps[filename] = pixmap
         else:
-            filename_base = os.path.splitext(filename)[0]
-            self.retrainMaskedPixmaps[filename_base] = pixmap
+            self.retrainMaskedPixmaps[filename] = pixmap
+
+        try:
+            finished_index = self.previewList.index(filename)
+            if finished_index == self.previewIndex:
+                self.showImageAtIndex(finished_index)
+
+        except ValueError:
+            pass
 
     def onMaskingError(self, error_message):
         self.showProgressMessage(f"[ERROR] Masking failed: {error_message}")
@@ -1409,8 +1502,6 @@ class PyMarAiGuiApp(QDialog):
         self.progressBar.hide()
         self.progressBarLabel.hide()
         self.enableWidgets(True)
-        self.applyMaskButton.setEnabled(True)
-        self.removeMaskButton.setEnabled(True)
         self.showProgressMessage("Batch mask application complete.")
 
         if self.previewList and 0 <= self.previewIndex < len(self.previewList):
@@ -1449,7 +1540,6 @@ class PyMarAiGuiApp(QDialog):
             app_instance=self,
             filenames=self.previewList,
             input_dir=self.selectedInputDirectory,
-            output_dir=self.outputFilePathTextEdit.text().strip(),
             mask_settings=mask_settings,
             tab_type="prediction"
         )
@@ -1483,7 +1573,6 @@ class PyMarAiGuiApp(QDialog):
             app_instance=self,
             filenames=self.retrainPreviewList,
             input_dir=self.selectedRetrainInputDirectory,
-            output_dir=self.retrainOutputFilePathTextEdit.text().strip(),
             mask_settings=mask_settings,
             tab_type="retrain"
         )
@@ -1562,15 +1651,21 @@ class PyMarAiGuiApp(QDialog):
             self.update_progress_text_signal.emit("[ERROR] No files selected to open in ROVER.\n")
             return
 
-        selected_filenames = [self.cleanFilename(item.text()) for item in selected_items if "[✓]" in item.text()]
+        analyzed_filenames = []
+        for item in selected_items:
+            full_path = item.data(Qt.UserRole)
+            # check if the file has an analyzed status in the file_status dictionary
+            status = self.file_status.get(full_path)
+            if status in ("TO DO", "GOOD", "BAD"):
+                analyzed_filenames.append(full_path)
 
-        if not selected_filenames:
+        if not analyzed_filenames:
             self.update_progress_text_signal.emit(
                 "[ERROR] None of the selected files are marked as analyzed. Skipping.\n")
             return
 
-        # call the new method with the list of files
-        self.openMultipleFilesInRover(selected_filenames)
+        # Now, call the function to open the files
+        self.openMultipleFilesInRover(analyzed_filenames)
 
     # selects all files in the re-training input list
     def selectAllRetrainFiles(self):
@@ -1649,7 +1744,7 @@ class PyMarAiGuiApp(QDialog):
         text = item.text()
         filename = self.cleanFilename(text)
 
-        if "[✓]" not in text:
+        if "[TO DO]" not in text:
             self.update_progress_text_signal.emit(
                 f"[ERROR] '{filename}' is not marked as analyzed. Skipping open with ROVER.\n")
             return
@@ -1657,27 +1752,28 @@ class PyMarAiGuiApp(QDialog):
         self.openMultipleFilesInRover([filename])
 
     def openMultipleFilesInRover(self, selected_filenames):
-        output_dir = self.outputFilePathTextEdit.text().strip()
+        output_dir = self.hiddenOutputDir
         if not os.path.isdir(output_dir):
             self.update_progress_text_signal.emit("[ERROR] Output directory is not valid.\n")
             QMessageBox.warning(self, "Open in ROVER", "Please select a valid output directory.")
             return
 
         v_files_to_open = []
-        for filename in selected_filenames:
-            base, _ = os.path.splitext(filename)
+        output_files = os.listdir(output_dir)
 
-            # find all .v files matching the base filename
-            vFiles = [
+        for filename in selected_filenames:
+            base, _ = os.path.splitext(os.path.basename(filename))
+
+            matching_v_files = [
                 os.path.join(output_dir, f)
-                for f in os.listdir(output_dir)
-                if os.path.isfile(os.path.join(output_dir, f)) and f.startswith(base) and f.endswith('.v')
+                for f in output_files
+                if base in f and f.endswith('.v')
             ]
 
-            if not vFiles:
+            if not matching_v_files:
                 self.update_progress_text_signal.emit(f"[ERROR] No .v file found for '{filename}'. Skipping.\n")
             else:
-                v_files_to_open.extend(vFiles)
+                v_files_to_open.extend(matching_v_files)
 
         if not v_files_to_open:
             self.update_progress_text_signal.emit("[ERROR] No valid .v files found to open in ROVER.\n")
@@ -1698,6 +1794,389 @@ class PyMarAiGuiApp(QDialog):
             QMessageBox.warning(self, "Error Opening ROVER",
                                 f"Could not open ROVER for selected files: {e}\nPlease ensure ROVER is installed and in your system PATH.")
 
+    def saveSelectedOutputs(self):
+        selected_items = self.inputFileListWidget.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "No files selected", "Please select one or more files to save.")
+            return
+
+        # check for analyzed files before opening the save dialog
+        files_not_analyzed = []
+        analyzed_files_info = []
+
+        for item in selected_items:
+            full_path = item.data(Qt.UserRole)
+            if full_path in self.file_status:
+                base_filename = os.path.splitext(os.path.basename(full_path))[0]
+                analyzed_files_info.append({
+                    'full_path': full_path,
+                    'base_filename': base_filename
+                })
+            else:
+                files_not_analyzed.append(os.path.basename(full_path))
+
+        if not analyzed_files_info:
+            if files_not_analyzed:
+                QMessageBox.information(self, "No Files to Save", "None of the selected files have been analyzed yet.")
+            return
+
+        destination_dir = QFileDialog.getExistingDirectory(self, "Select Destination Directory", os.getcwd())
+        if not destination_dir:
+            return
+
+        source_dir = self.hiddenOutputDir
+        all_output_files = os.listdir(source_dir)
+
+        files_copied = 0
+        files_failed_to_copy = []
+
+        # perform the copy operation for the analyzed files
+        for file_info in analyzed_files_info:
+            base_filename = file_info['base_filename']
+
+            # find all matching files for the current base_filename
+            matching_output_files = [
+                f for f in all_output_files
+                if f.startswith(base_filename) and (f.endswith('.v') or f.endswith('.rdf'))
+            ]
+
+            if not matching_output_files:
+                continue
+
+            for output_file in matching_output_files:
+                source_path = os.path.join(source_dir, output_file)
+
+                # determine the new, clean filename
+                file_extension = os.path.splitext(output_file)[1]
+                new_filename = f"{base_filename}{file_extension}"
+                destination_path = os.path.join(destination_dir, new_filename)
+
+                try:
+                    shutil.copy2(source_path, destination_path)
+                    files_copied += 1
+                except Exception as e:
+                    logger.error(f"Failed to copy {source_path}: {e}")
+                    files_failed_to_copy.append(output_file)
+
+        # display summary messages
+        final_message = []
+        if files_copied > 0:
+            final_message.append(f"Successfully copied {files_copied} output files to:\n{destination_dir}")
+        if files_not_analyzed:
+            final_message.append("Skipped the following files as they have not been analyzed:")
+            final_message.extend([f"• {f}" for f in files_not_analyzed])
+        if files_failed_to_copy:
+            final_message.append("Failed to copy the following files due to errors:")
+            final_message.extend([f"• {f}" for f in files_failed_to_copy])
+
+        if final_message:
+            QMessageBox.information(self, "Copying complete", "\\n\\n".join(final_message))
+
+    # generates a statistics table using the 'thrass' command for all selected files that have a 'GOOD' status
+    def generateStatisticsTable(self):
+        selected_items = self.inputFileListWidget.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "No files selected", "Please select one or more files to save.")
+            return
+
+        good_files = []
+        for item in selected_items:
+            full_path = item.data(Qt.UserRole)
+            if self.file_status.get(full_path) == "GOOD":
+                good_files.append(full_path)
+
+        if not good_files:
+            QMessageBox.information(self, "No 'GOOD' Files",
+                                    "Please select at least one file marked as 'GOOD' to generate statistics.")
+            return
+
+        source_dir = self.hiddenOutputDir
+
+        # check if the hidden directory exists and get a list of its contents
+        if not os.path.isdir(source_dir):
+            QMessageBox.critical(self, "Error", f"Hidden output directory not found: {source_dir}")
+            return
+
+        output_files = os.listdir(source_dir)
+
+        table_header = []
+        table_data = []
+
+        for full_path in good_files:
+            base_filename = os.path.splitext(os.path.basename(full_path))[0]
+
+            # find the corresponding .v file in the hidden directory by matching the base filename
+            matching_v_file = None
+            for f in output_files:
+                if f.startswith(base_filename) and f.endswith('.v'):
+                    matching_v_file = f
+                    break
+
+            if matching_v_file:
+                source_v_path = os.path.join(source_dir, matching_v_file)
+                try:
+                    command = ['thrass', '-t', 'spheroids', '-e', source_v_path]
+                    result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8')
+                    output_lines = result.stdout.strip().split('\n')
+
+                    if not table_header and len(output_lines) > 0:
+                        header_line = output_lines[0].replace('name fileName', 'fileName').strip().split()
+                        table_header = header_line
+
+                    if len(output_lines) > 1:
+                        for line in output_lines[1:]:
+                            data_row = line.strip().split()
+                            if data_row:
+                                # Clean the filename before appending it to the table_data
+                                cleaned_filename = re.sub(r'_(GOOD|BAD)_m\d+', '', data_row[0])
+                                data_row[0] = cleaned_filename
+                                table_data.append(data_row)
+
+                except subprocess.CalledProcessError as e:
+                    QMessageBox.warning(self, "Command Error",
+                                        f"Error generating stats for {matching_v_file}:\n{e.stderr}")
+                    return
+                except FileNotFoundError:
+                    QMessageBox.critical(self, "Command Not Found",
+                                         "'thrass' command not found. Please ensure it is in your system's PATH.")
+                    return
+            else:
+                QMessageBox.warning(self, "File Not Found",
+                                    f"Skipping {base_filename}: corresponding .v file not found in the hidden output directory.")
+
+        if table_data:
+            self.showStatisticsDialog(table_header, table_data)
+        else:
+            QMessageBox.information(self, "No Statistics", "No statistics could be generated for the selected files.")
+
+    # displays the collected statistics and provides an option to save as a CSV
+    def showStatisticsDialog(self, header, data):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Statistics Table Output")
+        dialog.setGeometry(100, 100, 900, 700)
+        layout = QVBoxLayout(dialog)
+
+        #create a QTableWidget to display the data as a table
+        table_widget = QTableWidget(dialog)
+        table_widget.setColumnCount(len(header))
+        table_widget.setRowCount(len(data))
+        table_widget.setHorizontalHeaderLabels(header)
+        table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+        # populate the table with data
+        for row_idx, row_data in enumerate(data):
+            for col_idx, item in enumerate(row_data):
+                table_widget.setItem(row_idx, col_idx, QTableWidgetItem(str(item)))
+
+        layout.addWidget(table_widget)
+
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("Save as CSV", dialog)
+        save_button.clicked.connect(lambda: self.saveTableAsCsv(header, data))
+        button_layout.addWidget(save_button)
+
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.close)
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout)
+        dialog.exec_()
+
+    # saves the statistics table data to a CSV file selected by the user
+    def saveTableAsCsv(self, header, data):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Statistics Table", "", "CSV Files (*.csv)")
+        if file_path:
+            try:
+                with open(file_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(header)
+                    writer.writerows(data)
+                QMessageBox.information(self, "Success", f"Statistics table saved to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"An error occurred while saving the file: {e}")
+
+    def onTabChanged(self, index):
+        if index == 0:
+            self.tabType = "prediction"
+        else:
+            self.tabType = "retrain"
+
+    # overridden keyPressEvent to handle arrow keys
+    def keyPressEvent(self, event):
+        if self.tabType == "prediction":
+            if event.key() == Qt.Key_Right:
+                self.markFileAsGood()
+            elif event.key() == Qt.Key_Left:
+                self.markFileAsBad()
+            else:
+                super().keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)
+
+    # mark the current file as "good"
+    def markFileAsGood(self):
+        if not self.current_preview_filename:
+            return
+
+        microscope_suffix = f"_m{self.microscopeComboBox.currentIndex()}"
+
+        base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
+
+        output_dir = self.hiddenOutputDir
+        if not os.path.isdir(output_dir):
+            self.update_progress_text_signal.emit(f"[ERROR] Output directory not found: {output_dir}\n")
+            return
+
+        renamed = []
+        for fname in os.listdir(output_dir):
+            fp = os.path.join(output_dir, fname)
+            if not os.path.isfile(fp):
+                continue
+            ext = os.path.splitext(fname)[1]
+            if ext.lower() not in ('.v', '.rdf'):
+                continue
+
+            file_base, _ = self.parseStatusFromFilename(os.path.splitext(fname)[0])
+            if file_base == base_input:
+                new_base = f"{file_base}_GOOD{microscope_suffix}"
+                new_fname = new_base + ext
+                new_fp = os.path.join(output_dir, new_fname)
+                try:
+                    # overwrite if destination exists
+                    os.replace(fp, new_fp)
+                    renamed.append((fname, new_fname))
+                except Exception as e:
+                    self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
+
+        if not renamed:
+            self.update_progress_text_signal.emit(
+                f"[ERROR] No output mask files found to mark for {self.current_preview_filename}\n")
+        else:
+            self.file_status[self.current_preview_filename] = "GOOD"
+            self.updateOutputBasenames()
+            self.updateFileStatusInList(self.current_preview_filename, "GOOD")
+            self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as GOOD for {base_input}.\n")
+
+    # mark the current file as "bad"
+    def markFileAsBad(self):
+        if not self.current_preview_filename:
+            return
+
+        microscope_suffix = f"_m{self.microscopeComboBox.currentIndex()}"
+        base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
+
+        output_dir = self.hiddenOutputDir
+        if not os.path.isdir(output_dir):
+            self.update_progress_text_signal.emit(f"[ERROR] Output directory not found: {output_dir}\n")
+            return
+
+        renamed = []
+        for fname in os.listdir(output_dir):
+            fp = os.path.join(output_dir, fname)
+            if not os.path.isfile(fp):
+                continue
+            ext = os.path.splitext(fname)[1]
+            if ext.lower() not in ('.v', '.rdf'):
+                continue
+            file_base, _ = self.parseStatusFromFilename(os.path.splitext(fname)[0])
+            if file_base == base_input:
+                new_base = f"{file_base}_BAD{microscope_suffix}"
+                new_fname = new_base + ext
+                new_fp = os.path.join(output_dir, new_fname)
+                try:
+                    os.replace(fp, new_fp)
+                    renamed.append((fname, new_fname))
+                except Exception as e:
+                    self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
+
+        if not renamed:
+            self.update_progress_text_signal.emit(
+                f"[ERROR] No output mask files found to mark for {self.current_preview_filename}\n")
+        else:
+            self.file_status[self.current_preview_filename] = "BAD"
+
+            self.updateOutputBasenames()
+            self.updateFileStatusInList(self.current_preview_filename, "BAD")
+            self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as BAD for {base_input}.\n")
+
+    # extract status from filename suffix like _GOOD_m1, _BAD_m2 etc
+    def parseStatusFromFilename(self, filename):
+        # remove the "_m#" suffix from the filename
+        filename_no_m = re.sub(r'_m\d+$', '', filename, flags=re.IGNORECASE)
+
+        # regex to find a status like "_GOOD" or "_BAD" at the end of the filename
+        match = re.search(r'_(GOOD|BAD)$', filename_no_m, re.IGNORECASE)
+
+        if match:
+            base = filename_no_m[:match.start()]
+            status = match.group(1).upper()
+            return base, status
+
+        return filename, None
+
+    def updateFileStatusInList(self, full_path: str, forced_status: str = None) -> None:
+        # use the full path to get the original filename and extension
+        original_filename = os.path.basename(full_path)
+        base_name, extension = os.path.splitext(original_filename)
+
+        status = self.file_status.get(full_path)
+        if forced_status:
+            status = forced_status
+
+        for i in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(i)
+
+            # match the item using the full path stored in its data
+            if item.data(Qt.UserRole) == full_path:
+                if status:
+                    item.setText(f"{base_name}{extension} [{status}]")
+                    if status == "GOOD":
+                        item.setForeground(QBrush(QColor("green")))
+                    elif status == "BAD":
+                        item.setForeground(QBrush(QColor("red")))
+                    else:
+                        item.setForeground(QBrush(QColor("#A9A9A9")))
+                else:
+                    # if no status, show the original filename with extension
+                    item.setText(original_filename)
+                    item.setForeground(Qt.black)
+                break
+
+    # select all files marked as GOOD in the list
+    def selectAllGoodFiles(self):
+        self.inputFileListWidget.clearSelection()
+        for i in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(i)
+            if "[GOOD]" in item.text():
+                item.setSelected(True)
+        self.updatePreviewList()
+
+    # select all files marked as BAD in the list
+    def selectAllBadFiles(self):
+        self.inputFileListWidget.clearSelection()
+        for i in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(i)
+            if "[BAD]" in item.text():
+                item.setSelected(True)
+        self.updatePreviewList()
+
+    # selects all files that have not yet been analysed (have no status)
+    def selectAllUntaggedFiles(self):
+        self.inputFileListWidget.clearSelection()
+        untagged_items = []
+
+        # Iterate through the list widget items once to find items with no status
+        for row in range(self.inputFileListWidget.count()):
+            item = self.inputFileListWidget.item(row)
+            file_path = item.data(Qt.UserRole)
+
+            if file_path not in self.file_status:
+                untagged_items.append(item)
+
+        # Set the selection for all identified unanalysed items
+        for item in untagged_items:
+            item.setSelected(True)
+
     ####################################################
     # handle the event of Run Prediction button pressing
 
@@ -1710,7 +2189,7 @@ class PyMarAiGuiApp(QDialog):
                 return
 
             selected_filenames = [self.cleanFilename(item.text()) for item in selected_items]
-            output_dir = self.outputFilePathTextEdit.text().strip()
+            output_dir = self.hiddenOutputDir
 
             already_analyzed = []
             for filename in selected_filenames:
@@ -1816,8 +2295,8 @@ class PyMarAiGuiApp(QDialog):
             return None
 
         # Filter out files that have already been analyzed
-        unprocessed_items = [item for item in selected_items if "[✓]" not in item.text()]
-        processed_items = [item for item in selected_items if "[✓]" in item.text()]
+        unprocessed_items = [item for item in selected_items if "[TO DO]" not in item.text()]
+        processed_items = [item for item in selected_items if "[TO DO]" in item.text()]
 
         if not unprocessed_items:
             self.update_progress_text_signal.emit(
@@ -1836,7 +2315,7 @@ class PyMarAiGuiApp(QDialog):
         ]
 
         # output directory
-        output_dir = self.outputFilePathTextEdit.text().strip()
+        output_dir = self.hiddenOutputDir
         if not os.path.isdir(output_dir):
             self.update_progress_text_signal.emit("[ERROR] Invalid output directory.\n")
             QMessageBox.warning(self, "Input Error", "Please select a valid output directory.")
@@ -1904,6 +2383,10 @@ class PyMarAiGuiApp(QDialog):
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
         self.switchElementsToPrediction(False)
+
+        # auto-apply mask overlay after prediction ends
+        if self.previewList:
+            self.applyPredictionMask()
 
     def retrainButtonPressed(self):
         pass
@@ -2162,12 +2645,12 @@ class MaskBatchWorker(QThread):
     finished = pyqtSignal()
     result = pyqtSignal(str, str, QPixmap)
 
-    def __init__(self, app_instance, filenames, input_dir, output_dir, mask_settings, tab_type, parent=None):
+    def __init__(self, app_instance, filenames, input_dir, mask_settings, tab_type, parent=None):
         super().__init__(parent)
         self.app = app_instance
         self.filenames = filenames
         self.input_dir = input_dir
-        self.output_dir = output_dir
+        # output_dir is no longer needed as an argument.
         self.mask_settings = mask_settings
         self.tab_type = tab_type
         self._abort = False
@@ -2177,18 +2660,18 @@ class MaskBatchWorker(QThread):
 
         for i, filename in enumerate(self.filenames):
             if self._abort:
-                self.message.emit("Batch mask application aborted.\n")
+                self.progress_message.emit("Batch mask application aborted.\n")
                 break
 
             try:
-                # Select method based on tab_type
+                # select method based on tab_type
                 if self.tab_type == "prediction":
                     pixmap = self.app.process_single_image_and_mask(
-                        filename, self.input_dir, self.output_dir, self.mask_settings, signals=self
+                        filename, self.input_dir, self.mask_settings, signals=self
                     )
                 elif self.tab_type == "retrain":
                     pixmap = self.app.process_single_image_and_mask_retrain(
-                        filename, self.input_dir, self.output_dir, self.mask_settings, signals=self
+                        filename, self.input_dir, self.mask_settings, signals=self
                     )
                 else:
                     raise ValueError(f"Unknown tab_type: {self.tab_type}")
