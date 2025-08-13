@@ -465,7 +465,6 @@ class PyMarAiGuiApp(QDialog):
         colormap_combo = QComboBox()
         colormaps = ['jet', 'viridis', 'plasma', 'inferno', 'magma', 'cividis', 'bone', 'copper', 'binary']
         colormap_combo.addItems(colormaps)
-        colormap_combo.setFixedSize(100, 25)
         selected_cmap = getattr(self, f"{tab_type}_gradient_colormap")
         index = colormap_combo.findText(selected_cmap)
         if index != -1:
@@ -485,7 +484,6 @@ class PyMarAiGuiApp(QDialog):
 
         # filled color
         filled_color_button = QPushButton("Select Color")
-        filled_color_button.setFixedSize(100, 25)
         color = getattr(self, f"{tab_type}_filled_color")
         filled_color_button.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
 
@@ -503,7 +501,6 @@ class PyMarAiGuiApp(QDialog):
 
         # contour color
         contour_color_button = QPushButton("Select Color")
-        contour_color_button.setFixedSize(100, 25)
         color = getattr(self, f"{tab_type}_contour_color")
         contour_color_button.setStyleSheet(f"background-color: {color.name()};")
 
@@ -572,6 +569,11 @@ class PyMarAiGuiApp(QDialog):
         self.prevButton.setEnabled(enable)
         self.nextButton.setEnabled(enable)
         self.openRoverButton.setEnabled(enable)
+        self.selectAllGoodButton.setEnabled(enable)
+        self.selectAllBadButton.setEnabled(enable)
+        self.selectAllUntaggedButton.setEnabled(enable)
+        self.saveOutputButton.setEnabled(enable)
+        self.generateStatsButton.setEnabled(enable)
 
         # prediction tab mask widgets
         self.prediction_gradient_checkbox.setEnabled(enable)
@@ -726,6 +728,7 @@ class PyMarAiGuiApp(QDialog):
             item = self.inputFileListWidget.item(i)
             full_path = item.data(Qt.UserRole)
             base_name = os.path.splitext(os.path.basename(full_path))[0]
+            base_name = self.stripMicroscopeTag(base_name)
 
             if base_name in self.outputBasenames:
                 status_found = None
@@ -763,6 +766,10 @@ class PyMarAiGuiApp(QDialog):
     # removes the suffix from a filename string
     def cleanFilename(self, text):
         return text.split(" [")[0].strip()
+
+    # removes _m<number> from the end of filename (before extension)
+    def stripMicroscopeTag(self, filename):
+        return re.sub(r"_m\d+$", "", filename)
 
     # opens a dialog to select the input directory for predictions
     def loadInputDirectory(self):
@@ -913,9 +920,12 @@ class PyMarAiGuiApp(QDialog):
             status = self.file_status.get(full_path)
             has_status = status in ("TO DO", "GOOD", "BAD")
 
-            # enable the GOOD/BAD buttons only if the specific file being previewed has a prediction
-            self.markGoodButton.setEnabled(has_status)
-            self.markBadButton.setEnabled(has_status)
+            # check if the "Remove Mask" button is enabled
+            is_mask_applied = self.removeMaskButton.isEnabled()
+
+            # enable the GOOD/BAD buttons only if the file has a status AND a mask is applied
+            self.markGoodButton.setEnabled(has_status and is_mask_applied)
+            self.markBadButton.setEnabled(has_status and is_mask_applied)
 
             # show the first image in the selection
             self.showImageAtIndex(self.previewIndex)
@@ -1267,7 +1277,7 @@ class PyMarAiGuiApp(QDialog):
         if not os.path.isdir(self.hiddenOutputDir):
             raise FileNotFoundError(f"Output directory not found: {self.hiddenOutputDir}")
 
-        pattern = re.compile(rf"^{re.escape(base_name)}(_(GOOD|BAD|TO DO))?(_m\d+)?\.v$", re.IGNORECASE)
+        pattern = re.compile(rf"^{re.escape(base_name)}(_m\d+)?(_(GOOD|BAD|TO DO))?\.v$", re.IGNORECASE)
         matching_files = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
 
         if not matching_files:
@@ -1278,7 +1288,7 @@ class PyMarAiGuiApp(QDialog):
 
         matched_v_file = matching_files[0]
         v_file_path_in_output = os.path.join(self.hiddenOutputDir, matched_v_file)
-        matched_base = os.path.splitext(matched_v_file)[0]
+        matched_base =  os.path.splitext(matched_v_file)[0]
 
         generated_mask_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn.v")
 
@@ -1927,8 +1937,8 @@ class PyMarAiGuiApp(QDialog):
                         for line in output_lines[1:]:
                             data_row = line.strip().split()
                             if data_row:
-                                # Clean the filename before appending it to the table_data
-                                cleaned_filename = re.sub(r'_(GOOD|BAD)_m\d+', '', data_row[0])
+                                # clean the filename before appending it to the table_data
+                                cleaned_filename = re.sub(r'_m\d+_(GOOD|BAD)', '', data_row[0])
                                 data_row[0] = cleaned_filename
                                 table_data.append(data_row)
 
@@ -1956,7 +1966,7 @@ class PyMarAiGuiApp(QDialog):
         dialog.setGeometry(100, 100, 900, 700)
         layout = QVBoxLayout(dialog)
 
-        #create a QTableWidget to display the data as a table
+        # create a QTableWidget to display the data as a table
         table_widget = QTableWidget(dialog)
         table_widget.setColumnCount(len(header))
         table_widget.setRowCount(len(data))
@@ -2018,8 +2028,6 @@ class PyMarAiGuiApp(QDialog):
         if not self.current_preview_filename:
             return
 
-        microscope_suffix = f"_m{self.microscopeComboBox.currentIndex()}"
-
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
 
         output_dir = self.hiddenOutputDir
@@ -2036,9 +2044,11 @@ class PyMarAiGuiApp(QDialog):
             if ext.lower() not in ('.v', '.rdf'):
                 continue
 
-            file_base, _ = self.parseStatusFromFilename(os.path.splitext(fname)[0])
-            if file_base == base_input:
-                new_base = f"{file_base}_GOOD{microscope_suffix}"
+            file_base_with_status = os.path.splitext(fname)[0]
+            file_base = file_base_with_status.removesuffix('_BAD').removesuffix('_GOOD')
+
+            if file_base.startswith(base_input):
+                new_base = f"{file_base}_GOOD"
                 new_fname = new_base + ext
                 new_fp = os.path.join(output_dir, new_fname)
                 try:
@@ -2062,7 +2072,6 @@ class PyMarAiGuiApp(QDialog):
         if not self.current_preview_filename:
             return
 
-        microscope_suffix = f"_m{self.microscopeComboBox.currentIndex()}"
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
 
         output_dir = self.hiddenOutputDir
@@ -2078,9 +2087,12 @@ class PyMarAiGuiApp(QDialog):
             ext = os.path.splitext(fname)[1]
             if ext.lower() not in ('.v', '.rdf'):
                 continue
-            file_base, _ = self.parseStatusFromFilename(os.path.splitext(fname)[0])
-            if file_base == base_input:
-                new_base = f"{file_base}_BAD{microscope_suffix}"
+
+            file_base_with_status = os.path.splitext(fname)[0]
+            file_base = file_base_with_status.removesuffix('_BAD').removesuffix('_GOOD')
+
+            if file_base.startswith(base_input):
+                new_base = f"{file_base}_BAD"
                 new_fname = new_base + ext
                 new_fp = os.path.join(output_dir, new_fname)
                 try:
@@ -2099,18 +2111,16 @@ class PyMarAiGuiApp(QDialog):
             self.updateFileStatusInList(self.current_preview_filename, "BAD")
             self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as BAD for {base_input}.\n")
 
-    # extract status from filename suffix like _GOOD_m1, _BAD_m2 etc
+    # extract status from filename suffix like _m1_GOOD, _m2_BAD etc
     def parseStatusFromFilename(self, filename):
-        # remove the "_m#" suffix from the filename
-        filename_no_m = re.sub(r'_m\d+$', '', filename, flags=re.IGNORECASE)
-
-        # regex to find a status like "_GOOD" or "_BAD" at the end of the filename
-        match = re.search(r'_(GOOD|BAD)$', filename_no_m, re.IGNORECASE)
+        match = re.search(r'(_m\d+)?_(GOOD|BAD)$', filename, re.IGNORECASE)
 
         if match:
-            base = filename_no_m[:match.start()]
-            status = match.group(1).upper()
+            base = filename[:match.start()]
+            status = match.group(2).upper()
             return base, status
+
+        filename = re.sub(r'_m\d+$', '', filename, flags=re.IGNORECASE)
 
         return filename, None
 
