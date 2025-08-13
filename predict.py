@@ -16,15 +16,17 @@ logger = logging.getLogger(__name__)
 
 # --- core task ---
 class PredictionTask:
-    def __init__(self, input_files: list, output_dir: str, microscope_number: int,
-                 use_local: bool = True, ssh_username: str = None, ssh_password: str = None,
-                 stop_event: Event = None, progress_callback=None, log_fn=None):
+    def __init__(self, input_files: list, output_dir: str, microscope_number: int, use_local: bool = True,
+                 ssh_username: str = None, ssh_password: str = None, hostname: str = None,
+                 gpu_id: str = None, stop_event: Event = None, progress_callback=None, log_fn=None):
         self.input_files = input_files
         self.output_dir = output_dir
         self.microscope_number = microscope_number
         self.use_local = use_local
         self.ssh_username = ssh_username
         self.ssh_password = ssh_password
+        self.hostname = hostname
+        self.gpu_id = gpu_id
         self.stop_event = stop_event
         self.progress_callback = progress_callback
         self.log_fn = log_fn or logger.info
@@ -53,9 +55,13 @@ class PredictionTask:
             self.log_fn("Using local predictor.")
             return MarAiLocal(stop_event=self.stop_event)
         else:
-            self.log_fn("Using remote predictor.")
-            return MarAiRemote(username=self.ssh_username, password=self.ssh_password,
-                               stop_event=self.stop_event)
+            self.log_fn(f"Using remote predictor on host: {self.hostname}.")
+            return MarAiRemote(
+                hostname=self.hostname, # Pass the hostname here
+                username=self.ssh_username,
+                password=self.ssh_password,
+                stop_event=self.stop_event
+            )
 
     def _disconnect_if_needed(self):
         if isinstance(self.predictor, MarAiRemote):
@@ -124,19 +130,19 @@ def gui_entry_point(params: dict, username: str, password: str,
     progress_callback = make_progress_callback(progress_pipe_connection, gui_log_fn)
 
     try:
-        default_hostname = AppConfig().get_default_host()
+        hostname, gpu_id = AppConfig().get_best_available_host()
+        if not hostname:
+            raise RuntimeError("No available host found.")
+
         current_hostname = platform.node()
+        use_local = (current_hostname == hostname)
 
-        use_local = (current_hostname == default_hostname)
-
-        # log the decision
         if use_local:
-            gui_log_fn("The current machine matches the default host in the config. Running locally.")
-        elif not username or not password:
-            # if no SSH creds are provided and it's not the default host, we can't run.
-            raise ValueError("Not on the default host and no SSH credentials provided for remote execution.")
+            gui_log_fn(f"Selected local host {hostname}. Running locally.")
+        elif not username and not password:
+            gui_log_fn(f"Running remotely on {hostname} using SSH keys (no password).")
         else:
-            gui_log_fn(f"Running remotely. Current host: {current_hostname}, Default host: {default_hostname}.")
+            gui_log_fn(f"Selected remote host {hostname} (GPU {gpu_id if gpu_id else 'N/A'}).")
 
         task = PredictionTask(
             input_files=params.get('input_files', []),
@@ -145,6 +151,8 @@ def gui_entry_point(params: dict, username: str, password: str,
             use_local=use_local,
             ssh_username=username,
             ssh_password=password,
+            hostname=hostname,  
+            gpu_id=gpu_id, 
             stop_event=stop_event,
             progress_callback=progress_callback,
             log_fn=gui_log_fn
