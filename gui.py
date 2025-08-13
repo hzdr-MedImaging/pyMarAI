@@ -54,7 +54,7 @@ class PyMarAiGuiApp(QDialog):
         self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", os.getcwd())
         self.lastRetrainOutputDirectory = self.settings.value("lastRetrainOutputDir", os.getcwd())
 
-        self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, ".marai_output")
+        self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, f".pymarai-{os.getlogin()}")
 
         self.previewList = []
         self.retrainPreviewList = []
@@ -777,8 +777,7 @@ class PyMarAiGuiApp(QDialog):
         if dir_path:
             self.settings.setValue("lastInputDir", dir_path)
             self.loadFilesFromDirectory(dir_path)
-            self.hiddenOutputDir = os.path.join(dir_path, ".marai_output")
-            os.makedirs(self.hiddenOutputDir, exist_ok=True)
+            self.hiddenOutputDir = os.path.join(dir_path, f".pymarai-{os.getlogin()}")
             self.updatePreviewList()
             self.updateOutputBasenames()
 
@@ -1275,7 +1274,7 @@ class PyMarAiGuiApp(QDialog):
 
         # find matching .v file in the output directory
         if not os.path.isdir(self.hiddenOutputDir):
-            raise FileNotFoundError(f"Output directory not found: {self.hiddenOutputDir}")
+            os.makedirs(self.hiddenOutputDir, exist_ok=True)
 
         pattern = re.compile(rf"^{re.escape(base_name)}(_m\d+)?(_(GOOD|BAD|TO DO))?\.v$", re.IGNORECASE)
         matching_files = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
@@ -2327,10 +2326,6 @@ class PyMarAiGuiApp(QDialog):
 
         # output directory
         output_dir = self.hiddenOutputDir
-        if not os.path.isdir(output_dir):
-            self.update_progress_text_signal.emit("[ERROR] Invalid output directory.\n")
-            QMessageBox.warning(self, "Input Error", "Please select a valid output directory.")
-            return None
 
         # microscope selection
         microscope_text = self.microscopeComboBox.currentText()
