@@ -23,58 +23,59 @@ nnunet:
 machines:
   saturn:
       ip: 149.220.74.18
-      default: true
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   vega:
       ip: 149.220.74.70
-      cpu: false
-      gpu: true
+      type: gpu
+      cpu_threshold: 1.0
+      gpu_threshold: 90
   lyra:
       ip: 149.220.74.204
-      cpu: false
-      gpu: true
+      type: gpu
+      cpu_threshold: 1.0
+      gpu_threshold: 90
   atlas:
       ip: 149.220.74.144
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   janus:
       ip: 149.220.74.146
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   hati:
       ip: 149.220.74.154
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   kari:
       ip: 149.220.74.156
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   anthe:
       ip: 149.220.74.158
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   pan:
       ip: 149.220.74.161
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   orcus:
       ip: 149.220.74.136
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   proteus:
       ip: 149.220.74.142
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   narvi:
       ip: 149.220.74.148
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   jupiter:
       ip: 149.220.74.134
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
   neptun:
       ip: 149.220.74.63
-      cpu: true
-      gpu: false
+      type: cpu
+      cpu_threshold: 1.0
