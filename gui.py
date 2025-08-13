@@ -2229,20 +2229,20 @@ class PyMarAiGuiApp(QDialog):
                         return
 
             # SSH key check and conditional login window
-            user_home = os.path.expanduser("~")
-            ssh_dir = os.path.join(user_home, ".ssh")
+            ssh_dir = os.path.expanduser("~/.ssh")
             ssh_key_paths = [
-                os.path.join(ssh_dir, "id_rsa"),
+                # sorted by priority (most secure)
                 os.path.join(ssh_dir, "id_ed25519"),
+                os.path.join(ssh_dir, "id_rsa"),
             ]
 
-            ssh_key_exists = any(os.path.exists(p) for p in ssh_key_paths)
+            ssh_keys = [f for f in ssh_key_paths if os.path.exists(f)]
 
-            username = ""
+            username = os.getlogin()
             password = ""
             login_successful = False
 
-            if ssh_key_exists:
+            if ssh_keys:
                 self.update_progress_text_signal.emit("SSH key found for user. Proceeding without password prompt.\n")
                 login_successful = True # Assume success if key exists
             else:
@@ -2273,7 +2273,8 @@ class PyMarAiGuiApp(QDialog):
                     parent=self,
                     params=prediction_params,
                     username=username,
-                    password=password
+                    password=password,
+                    ssh_keys=ssh_keys
                 )
                 self.predictionThread.started.connect(self.processing_started_signal.emit)
                 self.predictionThread.finished.connect(self.processing_finished_signal.emit)
@@ -2406,12 +2407,13 @@ class PyMarAiThread(QtCore.QThread):
     text_update = pyqtSignal(str)
     error_message = pyqtSignal(str)
 
-    def __init__(self, parent, params, username, password):
+    def __init__(self, parent, params, username, password, ssh_keys):
         super().__init__()
         self.parent = parent
         self.params = params
         self.username = username
         self.password = password
+        self.ssh_keys = ssh_keys
         self._process = None
 
         # Create pipes
@@ -2435,6 +2437,7 @@ class PyMarAiThread(QtCore.QThread):
                 params=self.params,
                 username=self.username,
                 password=self.password,
+                ssh_keys=self.ssh_keys,
                 stdout_pipe_child=self.stdout_pipe_child,
                 progress_pipe_child=self.progress_pipe_child,
             )
@@ -2554,7 +2557,7 @@ class PyMarAiThread(QtCore.QThread):
                     logger.warning(f"[WARNING] Error closing ProgressEmitter pipe: {e}")
 
     class PredictionProcess(multiprocessing.Process):
-        # target, params, username, password, stdout_pipe_child, progress_pipe_child, hostname
+        # target, params, username, password, ssh_keys, stdout_pipe_child, progress_pipe_child, hostname
         def __init__(self, target, **kwargs):
             super().__init__()
             self._target = target

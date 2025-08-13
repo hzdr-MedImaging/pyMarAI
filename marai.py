@@ -333,7 +333,7 @@ class MarAiLocal(MarAiBase):
 
 
 class MarAiRemote(MarAiBase):
-    def __init__(self, hostname=None, ipaddress=None, username=None, password=None, cfg_path=None, stop_event=None):
+    def __init__(self, hostname=None, ipaddress=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None):
         super().__init__(cfg_path, stop_event=stop_event)
 
         # find matching host config
@@ -355,11 +355,10 @@ class MarAiRemote(MarAiBase):
         self.tempId = f"{os.getpid()}-{threading.get_ident()}"
 
         self.connected = False
-        self.pkey = paramiko.RSAKey.from_private_key_file(os.path.expanduser('~/.ssh/id_rsa'))
         self.ssh = paramiko.SSHClient()
-        self.ssh.load_system_host_keys()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.sftp = None
+        self.ssh_keys = ssh_keys
 
     def __del__(self):
         if hasattr(self, "connected") and self.connected:
@@ -394,10 +393,18 @@ class MarAiRemote(MarAiBase):
     def connect(self):
         if not self.connected:
             logger.info(f"[INFO] Connecting to remote host {self.hostname}...")
-            self.ssh.connect(self.hostname, username=self.username, password=self.password, allow_agent=True, pkey=self.pkey)
-            self.sftp = self.ssh.open_sftp()
-            self.connected = True
-            logger.info("[INFO] Successfully connected.")
+            try:
+                if len(self.ssh_keys) > 0:
+                    self.ssh.connect(self.hostname, port=22, username=self.username, key_filename=self.ssh_keys[0])
+                    logger.info(f"[INFO] Connection successful via key-based authentication ({self.ssh_keys[0]}).")
+                else:
+                    self.ssh.connect(self.hostname, port=22, username=self.username, password=self.password)
+                    logger.info(f"[INFO] Connection successful via password authentication")
+
+                self.sftp = self.ssh.open_sftp()
+                self.connected = True
+            except Exception as e:
+                logger.error(f"Connection failed: {e}")
 
     def disconnect(self):
         if self.connected:
@@ -416,7 +423,6 @@ class MarAiRemote(MarAiBase):
 
         # reinit ssh client for next connection
         self.ssh = paramiko.SSHClient()
-        self.ssh.load_system_host_keys()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     # run command remotely and stream output (now can signal completion)

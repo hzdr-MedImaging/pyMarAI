@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # --- core task ---
 class PredictionTask:
     def __init__(self, input_files: list, output_dir: str, microscope_number: int, use_local: bool = True,
-                 ssh_username: str = None, ssh_password: str = None, hostname: str = None,
+                 ssh_username: str = None, ssh_password: str = None, ssh_keys: list = None, hostname: str = None,
                  gpu_id: str = None, stop_event: Event = None, progress_callback=None, log_fn=None):
         self.input_files = input_files
         self.output_dir = output_dir
@@ -25,6 +25,7 @@ class PredictionTask:
         self.use_local = use_local
         self.ssh_username = ssh_username
         self.ssh_password = ssh_password
+        self.ssh_keys = ssh_keys
         self.hostname = hostname
         self.gpu_id = gpu_id
         self.stop_event = stop_event
@@ -60,6 +61,7 @@ class PredictionTask:
                 hostname=self.hostname, # Pass the hostname here
                 username=self.ssh_username,
                 password=self.ssh_password,
+                ssh_keys=self.ssh_keys,
                 stop_event=self.stop_event
             )
 
@@ -98,7 +100,7 @@ def make_progress_callback(progress_conn: Connection = None, log_fn=print):
 
 
 # --- GUI entry point ---
-def gui_entry_point(params: dict, username: str, password: str,
+def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
                     progress_pipe_connection: Connection,
                     stdout_pipe_connection: Connection,
                     stop_event: Event = None):
@@ -139,10 +141,15 @@ def gui_entry_point(params: dict, username: str, password: str,
 
         if use_local:
             gui_log_fn(f"Selected local host {hostname}. Running locally.")
-        elif not username and not password:
+        elif username and not password and ssh_keys:
             gui_log_fn(f"Running remotely on {hostname} using SSH keys (no password).")
+        elif username and password and not ssh_keys:
+            gui_log_fn(f"Running remotely on {hostname} using password authentication.")
+
+        if gpu_id:
+            gui_log_fn(f"Performing GPU processing using GPU {gpu_id} on {hostname}")
         else:
-            gui_log_fn(f"Selected remote host {hostname} (GPU {gpu_id if gpu_id else 'N/A'}).")
+            gui_log_fn(f"Performing CPU processing on {hostname}")
 
         task = PredictionTask(
             input_files=params.get('input_files', []),
@@ -151,6 +158,7 @@ def gui_entry_point(params: dict, username: str, password: str,
             use_local=use_local,
             ssh_username=username,
             ssh_password=password,
+            ssh_keys=ssh_keys,
             hostname=hostname,  
             gpu_id=gpu_id, 
             stop_event=stop_event,
