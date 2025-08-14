@@ -2430,7 +2430,7 @@ class PyMarAiThread(QtCore.QThread):
         self.text_update.emit("Starting prediction process...\n")
         try:
             self._process = self.PredictionProcess(
-                target=predict.gui_entry_point,
+                target=pymarai.predict.gui_entry_point,
                 params=self.params,
                 username=self.username,
                 password=self.password,
