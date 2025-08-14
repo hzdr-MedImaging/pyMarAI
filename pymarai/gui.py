@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 import csv
 import re
+from __init__ import __version__
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe
@@ -104,8 +105,7 @@ class PyMarAiGuiApp(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.tab_widget)
 
-        self.setWindowTitle("Spheroids-DNN: Auto Inference Tool")
-        self.resize(1600, 1200)
+        self.setWindowTitle(f"pyMarAI v{__version__} – Spheroids Auto Inference Tool (hzdr.de)")
 
         self.initElements()
 
