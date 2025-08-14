@@ -63,6 +63,7 @@ class PyMarAiGuiApp(QDialog):
         self.predictionThread = None
         self.retrainThread = None
         self.fileLoader = None
+        self.statusWorker = None
         self.processingRunning = False
         self.outputBasenames = set()
 
@@ -198,7 +199,7 @@ class PyMarAiGuiApp(QDialog):
 
         self.selectAllGoodButton = self.createButton("Select all GOOD", self.selectAllGoodFiles)
         self.selectAllBadButton = self.createButton("Select all BAD", self.selectAllBadFiles)
-        self.selectAllUntaggedButton = self.createButton("Select All Untagged", self.selectAllUntaggedFiles)
+        #self.selectAllUntaggedButton = self.createButton("Select All Untagged", self.selectAllUntaggedFiles)
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
         self.openRoverButton.setToolTip(
             "Opens all currently selected files in the ROVER application. It can also be triggered by double-clicking the file of interest.")
@@ -213,7 +214,7 @@ class PyMarAiGuiApp(QDialog):
         statusToolsLayout = QHBoxLayout(statusToolsWidget)
         statusToolsLayout.addWidget(self.selectAllGoodButton)
         statusToolsLayout.addWidget(self.selectAllBadButton)
-        statusToolsLayout.addWidget(self.selectAllUntaggedButton)
+        #statusToolsLayout.addWidget(self.selectAllUntaggedButton)
         statusToolsLayout.addWidget(self.openRoverButton)
         statusToolsLayout.addWidget(self.saveOutputButton)
         statusToolsLayout.addWidget(self.generateStatsButton)
@@ -571,7 +572,7 @@ class PyMarAiGuiApp(QDialog):
         self.openRoverButton.setEnabled(enable)
         self.selectAllGoodButton.setEnabled(enable)
         self.selectAllBadButton.setEnabled(enable)
-        self.selectAllUntaggedButton.setEnabled(enable)
+        #self.selectAllUntaggedButton.setEnabled(enable)
         self.saveOutputButton.setEnabled(enable)
         self.generateStatsButton.setEnabled(enable)
 
@@ -724,44 +725,34 @@ class PyMarAiGuiApp(QDialog):
     # marks files in the input list that have already been analyzed
     def markAnalyzedFiles(self):
         output_dir = self.hiddenOutputDir
-        for i in range(self.inputFileListWidget.count()):
-            item = self.inputFileListWidget.item(i)
-            full_path = item.data(Qt.UserRole)
-            base_name = os.path.splitext(os.path.basename(full_path))[0]
-            base_name = self.stripMicroscopeTag(base_name)
+        items = [self.inputFileListWidget.item(i) for i in range(self.inputFileListWidget.count())]
 
-            if base_name in self.outputBasenames:
-                status_found = None
-                if os.path.isdir(output_dir):
-                    for f in os.listdir(output_dir):
-                        fp = os.path.join(output_dir, f)
-                        if not os.path.isfile(fp):
-                            continue
-                        f_base, f_status = self.parseStatusFromFilename(os.path.splitext(f)[0])
-                        if f_base == base_name and f_status:
-                            status_found = f_status
-                            break
+        self.inputFileListWidget.setUpdatesEnabled(False)
+        self.file_status.clear()
 
-                if not status_found:
-                    status_found = "TO DO"
+        self.statusWorker = FileStatusWorker(
+            input_items=items,
+            output_dir=output_dir,
+            parse_status_func=self.parseStatusFromFilename,
+            strip_microscope_tag_func=self.stripMicroscopeTag
+        )
 
-                if status_found:
-                    self.file_status[full_path] = status_found
-                    item.setText(f"{os.path.basename(full_path)} [{status_found}]")
-                    if status_found == "GOOD":
-                        item.setForeground(QBrush(QColor("green")))
-                    elif status_found == "BAD":
-                        item.setForeground(QBrush(QColor("red")))
-                    elif status_found == "TO DO":
-                        item.setForeground(QBrush(QColor("orange")))
-                    else:
-                        item.setForeground(QBrush(QColor("#A9A9A9")))
-            else:
-                item.setText(os.path.basename(full_path))
-                item.setForeground(Qt.black)
+        def apply_batch(batch):
+            for row, text, color, status_found in batch:
+                item = self.inputFileListWidget.item(row)
+                full_path = item.data(Qt.UserRole)
+                self.file_status[full_path] = status_found
+                item.setText(text)
+                item.setForeground(QBrush(color))
 
-        if self.inputFileListWidget.selectedItems():
-            self.updatePreviewList()
+        def finish():
+            self.inputFileListWidget.setUpdatesEnabled(True)
+            if self.inputFileListWidget.selectedItems():
+                self.updatePreviewList()
+
+        self.statusWorker.batch_ready.connect(apply_batch)
+        self.statusWorker.finished_all.connect(finish)
+        self.statusWorker.start()
 
     # removes the suffix from a filename string
     def cleanFilename(self, text):
@@ -1560,6 +1551,7 @@ class PyMarAiGuiApp(QDialog):
         self.maskWorker.finished.connect(self.onMaskingFinishedAll)
 
         self.maskWorker.start()
+        self.updatePreviewList()
 
     def applyRetrainMask(self):
         if not self.retrainPreviewList:
@@ -1601,6 +1593,7 @@ class PyMarAiGuiApp(QDialog):
 
         # refresh current image (to show original image instead of masked)
         self.showImageAtIndex(self.previewIndex)
+        self.updatePreviewList()
 
     # removes the mask overlay and displays the original re-training image
     def removeRetrainMask(self):
@@ -2027,6 +2020,10 @@ class PyMarAiGuiApp(QDialog):
         if not self.current_preview_filename:
             return
 
+        if not self.removeMaskButton.isEnabled():
+            self.showProgressMessage("[ERROR] Apply a mask before marking as GOOD.")
+            return
+
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
 
         output_dir = self.hiddenOutputDir
@@ -2069,6 +2066,10 @@ class PyMarAiGuiApp(QDialog):
     # mark the current file as "bad"
     def markFileAsBad(self):
         if not self.current_preview_filename:
+            return
+
+        if not self.removeMaskButton.isEnabled():
+            self.showProgressMessage("[ERROR] Apply a mask before marking as BAD.")
             return
 
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
@@ -2343,9 +2344,10 @@ class PyMarAiGuiApp(QDialog):
             QMessageBox.warning(self, "Input Error", "Invalid microscope selection.")
             return None
 
+        filenames_to_log = [os.path.basename(f) for f in input_files]
+        log_message = ", ".join(filenames_to_log)
         self.update_progress_text_signal.emit(f"Running prediction with {len(input_files)} file(s).\n"
-                                              f"Input files: {input_files}\n"
-                                              f"Output dir: {output_dir}\n"
+                                              f"Input files: {log_message}\n"
                                               f"Microscope: {microscope_number}\n")
 
         # return a dictionary of parameters for clarity
@@ -2695,6 +2697,64 @@ class MaskBatchWorker(QThread):
 
     def abort(self):
         self._abort = True
+
+class FileStatusWorker(QThread):
+    batch_ready = pyqtSignal(list)  # list of (row, text, color, status)
+    finished_all = pyqtSignal()
+
+    def __init__(self, input_items, output_dir, parse_status_func, strip_microscope_tag_func, parent=None):
+        super().__init__(parent)
+        self.input_items = input_items
+        self.output_dir = output_dir
+        self.parse_status_func = parse_status_func
+        self.strip_microscope_tag_func = strip_microscope_tag_func
+
+    def run(self):
+        status_map = {}
+        if os.path.isdir(self.output_dir):
+            for f in os.listdir(self.output_dir):
+                if not os.path.isfile(os.path.join(self.output_dir, f)):
+                    continue
+                base_no_ext = os.path.splitext(f)[0]
+                base, status = self.parse_status_func(base_no_ext)
+                if status:  # GOOD/BAD
+                    status_map[base] = status
+                else:
+                    status_map.setdefault(base, "TO DO")
+
+        batch = []
+        for row, item in enumerate(self.input_items):
+            full_path = item.data(Qt.UserRole)
+            base_name = os.path.splitext(os.path.basename(full_path))[0]
+            base_name = self.strip_microscope_tag_func(base_name)
+
+            if base_name in status_map:
+                status_found = status_map[base_name]
+                text = f"{os.path.basename(full_path)} [{status_found}]"
+                if status_found == "GOOD":
+                    color = QColor("green")
+                elif status_found == "BAD":
+                    color = QColor("red")
+                elif status_found == "TO DO":
+                    color = QColor("orange")
+                else:
+                    color = QColor("#A9A9A9")
+            else:
+                status_found = None
+                text = os.path.basename(full_path)
+                color = QColor("black")
+
+            batch.append((row, text, color, status_found))
+
+            if len(batch) >= 50:
+                self.batch_ready.emit(batch)
+                batch = []
+                self.msleep(1)
+
+        if batch:
+            self.batch_ready.emit(batch)
+
+        self.finished_all.emit()
 
 
 # main function to start GUI
