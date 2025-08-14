@@ -15,7 +15,7 @@ setup(
     # https://packaging.python.org/en/latest/single_source_version.html
     version=__version__,
 
-    description='Converts nifti images to ecat images in directory',
+    description='Spheroids Auto Delineation',
     #long_description=long_description,
 
     # The project's main homepage.
@@ -49,7 +49,7 @@ setup(
     ],
 
     # What does your project relate to?
-    keywords='tomography medical imaging nifti ecat',
+    keywords='biology microscopy delineation spheroids ai',
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().

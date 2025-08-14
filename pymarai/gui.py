@@ -105,7 +105,7 @@ class PyMarAiGuiApp(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.tab_widget)
 
-        self.setWindowTitle(f"pyMarAI v{__version__} – Spheroids Auto Inference Tool (hzdr.de)")
+        self.setWindowTitle(f"pyMarAI v{__version__} – Spheroids Auto Delineation (hzdr.de)")
 
         self.initElements()
 
