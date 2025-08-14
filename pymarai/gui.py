@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 import csv
 import re
-from __init__ import __version__
+from pymarai.__init__ import __version__
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe
