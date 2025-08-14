@@ -58,11 +58,12 @@ class PredictionTask:
         else:
             self.log_fn(f"Using remote predictor on host: {self.hostname}.")
             return MarAiRemote(
-                hostname=self.hostname, # Pass the hostname here
+                hostname=self.hostname,
                 username=self.ssh_username,
                 password=self.ssh_password,
                 ssh_keys=self.ssh_keys,
-                stop_event=self.stop_event
+                stop_event=self.stop_event,
+                gpu_id=self.gpu_id
             )
 
     def _disconnect_if_needed(self):
@@ -159,8 +160,8 @@ def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
             ssh_username=username,
             ssh_password=password,
             ssh_keys=ssh_keys,
-            hostname=hostname,  
-            gpu_id=gpu_id, 
+            hostname=hostname,
+            gpu_id=gpu_id,
             stop_event=stop_event,
             progress_callback=progress_callback,
             log_fn=gui_log_fn
@@ -226,3 +227,4 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
+
