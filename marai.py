@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import platform
 import yaml
@@ -10,6 +11,7 @@ import time
 import logging
 import shlex
 import re
+import io
 
 from abc import ABC
 
@@ -222,10 +224,10 @@ class MarAiLocal(MarAiBase):
         self.processed_files_count = 0
         self.reported_nnunet_files.clear()
         self.reported_rdf_files.clear()
-        self.nnunet_process_finished_event.clear()  # Reset for each call
+        self.nnunet_process_finished_event.clear()
 
         if self.stop_event and self.stop_event.is_set():
-            logger.info("[INFO] Local prediction aborted by external signal before start.")
+            logger.info("[INFO] Local prediction aborted before start.")
             return
 
         nnunet_input_dir = os.path.join(self.localTempDir.name, "nnunet_input")
@@ -235,105 +237,69 @@ class MarAiLocal(MarAiBase):
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
-        logger.info(f"[INFO] Preparing {self.total_expected_files} files for nnUNet...")
-        # Add a counter for the "Preparing files" stage
-        prepared_files_count = 0
+        # --- Copy input files to temp dir ---
+        logger.info("[INFO] Copying input files to temporary directory...")
         for input_file in input_files:
-            if self.stop_event and self.stop_event.is_set():
-                logger.info("[INFO] Local prediction aborted by external signal during preprocessing.")
-                return
+            shutil.copy(input_file, os.path.join(self.localTempDir.name, os.path.basename(input_file)))
 
-            file_prefix = self.get_file_prefix(input_file)
-            temp_input_path_for_mic2ecat = os.path.join(self.localTempDir.name, os.path.basename(input_file))
-            shutil.copy(input_file, temp_input_path_for_mic2ecat)
+        # --- Run mic2ecat  ---
+        logger.info("[INFO] Running mic2ecat on all files in temp dir...")
+        mic2ecat_cmd = f"cd {self.localTempDir.name} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        self.runCommand(mic2ecat_cmd, stream_output=True)
 
-            v_path = os.path.join(self.localTempDir.name, f"{file_prefix}.v")
-            self.runCommand([self.mic2ecat_path, "-j", str(microscope_number), temp_input_path_for_mic2ecat])
-            shutil.copy(v_path, os.path.join(nnunet_input_dir, self._get_nnunet_input_name_for_temp_copy(file_prefix)))
+        # --- Move mic2ecat .v outputs into nnunet_input ---
+        logger.info("[INFO] Moving and renaming mic2ecat outputs into nnunet_input directory...")
 
-            # Report progress for "Preparing files for prediction"
-            prepared_files_count += 1
-            if self.progress_callback:
-                self.progress_callback(
-                    prepared_files_count,
-                    self.total_expected_files,
-                    os.path.basename(input_file),
-                    "Preparing files for prediction"  # New stage indicator
-                )
+        move_cmd = (
+            f"cd {self.localTempDir.name} && "
+            f"for file in *.v; do "
+            f"  prefix=$(basename \"$file\" .v); "
+            f"  mv -- \"$file\" \"{nnunet_input_dir}/${{prefix}}_0000.v\"; "
+            f"done"
+        )
+        self.runCommand(move_cmd, stream_output=True)
 
-        logger.info("[INFO] Finished uploading and preprocessing.")
-
-        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
-        nnunet_cmd += f" -device cpu"
-        logger.info(f"[INFO] Running nnUNet command: {nnunet_cmd}")
-
-        # The progress pattern for nnUNet already captures the filename.
-        # The stage indicator for nnUNet is already set in runCommand.
+        # --- Run nnUNet ---
+        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir) + " -device cpu"
         nnunet_progress_pattern = r"done with (\S+)"
+        nnunet_thread = threading.Thread(target=self.runCommand,
+                                         args=(nnunet_cmd, True, self.nnunet_process_finished_event,
+                                               nnunet_progress_pattern, original_input_files_map))
+        nnunet_thread.start()
+        nnunet_thread.join()
 
-        # nnUNet execution now directly reports progress via runCommand's streaming
-        nnunet_execution_thread = threading.Thread(target=self.runCommand,
-                                                   args=(nnunet_cmd, True, self.nnunet_process_finished_event,
-                                                         nnunet_progress_pattern, original_input_files_map))
-        nnunet_execution_thread.daemon = True
-        nnunet_execution_thread.start()
+        # --- Run roi2rdf ---
+        logger.info("[INFO] Running roi2rdf on all files in nnunet output dir...")
+        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
+        self.runCommand(roi2rdf_cmd, stream_output=True)
 
-        # wait for the nnUNet execution thread to complete
+        # --- Copy outputs to final output_dir ---
+        logger.info("[INFO] Copying all .v and .rdf outputs to final destination...")
+
+        copy_outputs_cmd = (
+            f"cd {self.localTempDir.name} && "
+            f"cp -- *.v {shlex.quote(output_dir)} && "
+            f"cd {nnunet_output_dir} && "
+            f"cp -- *.v {shlex.quote(output_dir)} && "
+            f"cp -- *.rdf {shlex.quote(output_dir)}"
+        )
+        self.runCommand(copy_outputs_cmd, stream_output=True)
+
+        # --- Rename the output files ---
+        logger.info("[INFO] Renaming nnUNet output files...")
         try:
-            nnunet_execution_thread.join()
+            for filename in os.listdir(output_dir):
+                if filename.endswith('_0000.v'):
+                    new_filename = filename.replace('_0000.v', '.v')
+                    old_path = os.path.join(output_dir, filename)
+                    new_path = os.path.join(output_dir, new_filename)
+                    os.rename(old_path, new_path)
+                    logger.debug(f"Renamed {old_path} to {new_path}")
         except Exception as e:
-            logger.error(f"[ERROR] An error occurred in the nnUNet execution thread: {e}")
-            raise
-
-        logger.info("[INFO] nnUNet prediction command completed (execution thread finished).")
-
-        # post-processing (roi2rdf and copying to final output_dir)
-        rdf_processed_count = 0
-        for input_file in input_files:
-            if self.stop_event and self.stop_event.is_set():
-                logger.info("[INFO] Local prediction aborted by external signal during post-processing.")
-                break
-
-            file_prefix = self.get_file_prefix(input_file)
-            nnunet_v_path_in_temp, rdf_path_in_temp = self._get_expected_full_paths_in_nnunet_output_dir(
-                nnunet_output_dir, file_prefix)
-
-            # ensure roi2rdf is run
-            if self._check_file_existence(nnunet_v_path_in_temp):
-                self.runCommand([self.roi2rdf_path, nnunet_v_path_in_temp], stream_output=True)
-                try:
-                    self._wait_for_file_existence(rdf_path_in_temp)
-                except TimeoutError as e:
-                    logger.warning(f"Warning: {e}. RDF for {file_prefix} might be missing or delayed.")
-
-            local_v_path = os.path.join(output_dir, f"{file_prefix}.v")
-            local_rdf_path = os.path.join(output_dir, self._get_roi2rdf_output_name_in_temp(file_prefix))
-
-            mic2ecat_v_path = os.path.join(self.localTempDir.name, f"{file_prefix}.v")
-            if self._check_file_existence(mic2ecat_v_path) and not os.path.exists(local_v_path):
-                shutil.copy(mic2ecat_v_path, local_v_path)
-
-            if self._check_file_existence(rdf_path_in_temp) and not os.path.exists(local_rdf_path):
-                shutil.copy(rdf_path_in_temp, local_rdf_path)
-
-            if os.path.exists(local_rdf_path) and file_prefix not in self.reported_rdf_files:
-                rdf_processed_count += 1
-                self.reported_rdf_files.add(file_prefix)
-                if self.progress_callback:
-                    self.progress_callback(
-                        rdf_processed_count,
-                        self.total_expected_files,
-                        os.path.basename(input_file),
-                        "Making ROI mask files"  # Changed label here to be more descriptive
-                    )
-                logger.info(
-                    f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
-
-        logger.info("[INFO] All files post-processed and progress confirmed.")
-
+            logger.error(f"[ERROR] Error renaming files: {e}")
 
 class MarAiRemote(MarAiBase):
-    def __init__(self, hostname=None, ipaddress=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None):
+    def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None, gpu_id=None):
         super().__init__(cfg_path, stop_event=stop_event)
 
         # find matching host config
@@ -343,6 +309,7 @@ class MarAiRemote(MarAiBase):
 
         # extract details from config
         self.host_cfg = selected_host_cfg
+        self.gpu_id = gpu_id
         self.hostname = selected_host_cfg.get('hostname')
         self.ipaddress = selected_host_cfg.get('ip')
 
@@ -433,11 +400,22 @@ class MarAiRemote(MarAiBase):
 
         if isinstance(cmd, list):
             cmd_quoted = [shlex.quote(str(c)) for c in cmd]
-            cmd_str = 'stdbuf -o0 ' + ' '.join(cmd_quoted)
+            cmd_str = ' '.join(cmd_quoted)
         else:
-            cmd_str = f"stdbuf -o0 {cmd}"
+            cmd_str = str(cmd)
 
-        stdin, stdout, stderr = self.ssh.exec_command(cmd_str, get_pty=True)
+        # add CUDA_VISIBLE_DEVICES for GPU-relevant commands
+        gpu_tools = [
+            os.path.basename(self.mic2ecat_path),
+            os.path.basename(self.roi2rdf_path),
+            "nnUNetv2_predict"
+        ]
+
+        if self.gpu_id is not None and any(tool in cmd_str for tool in gpu_tools):
+            cmd_str = f"CUDA_VISIBLE_DEVICES={self.gpu_id} {cmd_str}"
+        full_cmd = f"stdbuf -o0 bash -c {shlex.quote(cmd_str)}"
+
+        stdin, stdout, stderr = self.ssh.exec_command(full_cmd, get_pty=True)
 
         if stream_output:
             for line in iter(stdout.readline, ""):
@@ -445,42 +423,21 @@ class MarAiRemote(MarAiBase):
                 if progress_pattern and self.progress_callback and original_input_files_map:
                     match = re.search(progress_pattern, line)
                     if match:
-                        filename = match.group(1) # Assuming group 1 captures the filename/prefix
+                        filename = match.group(1)
                         file_prefix_from_output = os.path.splitext(filename)[0]
-
                         if file_prefix_from_output in original_input_files_map and \
-                           file_prefix_from_output not in self.reported_nnunet_files:
+                                file_prefix_from_output not in self.reported_nnunet_files:
                             self.reported_nnunet_files.add(file_prefix_from_output)
                             current_nnunet_count = len(self.reported_nnunet_files)
                             original_input_filepath = original_input_files_map[file_prefix_from_output]
-
                             self.progress_callback(
                                 current_nnunet_count,
                                 self.total_expected_files,
                                 os.path.basename(original_input_filepath),
                                 "Running prediction"
                             )
-                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stdout: {current_nnunet_count}/{self.total_expected_files}")
-            # Also process stderr for potential progress messages, though less common for "Done"
             for line in iter(stderr.readline, ""):
                 print(line, end='')
-                if progress_pattern and self.progress_callback and original_input_files_map:
-                    match = re.search(progress_pattern, line)
-                    if match:
-                        filename = match.group(1)
-                        file_prefix_from_output = os.path.splitext(filename)[0]
-                        if file_prefix_from_output in original_input_files_map and \
-                           file_prefix_from_output not in self.reported_nnunet_files:
-                            self.reported_nnunet_files.add(file_prefix_from_output)
-                            current_nnunet_count = len(self.reported_nnunet_files)
-                            original_input_filepath = original_input_files_map[file_prefix_from_output]
-                            self.progress_callback(
-                                current_nnunet_count,
-                                self.total_expected_files,
-                                os.path.basename(original_input_filepath),
-                                "nnunet_predicting"
-                            )
-                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stderr: {current_nnunet_count}/{self.total_expected_files}")
         else:
             output = stdout.read().decode('utf-8') + stderr.read().decode('utf-8')
             print(output)
@@ -490,7 +447,7 @@ class MarAiRemote(MarAiBase):
             raise RuntimeError(f"[ERROR] Remote command failed with exit status {exit_status}: {cmd_str}.\n")
 
         if process_event_on_completion:
-            process_event_on_completion.set()  # signal that this command has completed
+            process_event_on_completion.set()
 
     def _check_file_existence(self, file_path):
         if not self.sftp:
@@ -509,144 +466,125 @@ class MarAiRemote(MarAiBase):
             raise RuntimeError("[ERROR] SFTP client not connected.")
         return self.sftp.listdir(directory_path)
 
-    def predictCall(self, input_files, microscope_number, output_dir,
-                    progress_callback=None):
+    def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
         self.progress_callback = progress_callback
         self.total_expected_files = len(input_files)
         self.processed_files_count = 0
         self.reported_nnunet_files.clear()
         self.reported_rdf_files.clear()
         self.nnunet_process_finished_event.clear()
-        remote_temp = None
 
         if self.stop_event and self.stop_event.is_set():
-            logger.info("[INFO] Remote prediction aborted by external signal before start.")
+            logger.info("[INFO] Remote prediction aborted before start.")
             return
 
+        self.connect()
+        remote_temp = f"/tmp/marai-{self.tempId}"
+        nnunet_input = f"{remote_temp}/nnunet_input"
+        nnunet_output = f"{remote_temp}/nnunet_output"
+        self.runCommand(["mkdir", "-p", remote_temp, nnunet_input, nnunet_output])
+
+        original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
+
+        # --- In-memory packaging of input files ---
+        logger.info(f"[INFO] Packaging {len(input_files)} files for in-memory upload...")
+        local_input_tar_fo = io.BytesIO()
         try:
-            self.connect()
-            remote_temp = f"/tmp/marai-{self.tempId}"
-            nnunet_input = f"{remote_temp}/nnunet_input"
-            nnunet_output = f"{remote_temp}/nnunet_output"
-            self.runCommand(["mkdir", "-p", remote_temp, nnunet_input, nnunet_output], stream_output=True)
-
-            original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
-
-            logger.info(f"[INFO] Preparing {self.total_expected_files} files for nnUNet...")
-            # Add a counter for the "Preparing files" stage
-            prepared_files_count = 0
-            for i, input_file in enumerate(input_files):
-                if self.stop_event and self.stop_event.is_set():
-                    logger.info("[INFO] Remote prediction aborted by external signal during upload.")
-                    raise UserCancelledError("Remote upload cancelled by user.")
-
-                file_prefix = self.get_file_prefix(input_file)
-                ext = os.path.splitext(input_file)[1]
-                remote_input = f"{remote_temp}/{file_prefix}{ext}"
-                self.sftp.put(input_file, remote_input)
-
-                v_path = f"{remote_temp}/{file_prefix}.v"
-                self.runCommand([self.mic2ecat_path, "-j", str(microscope_number), remote_input], stream_output=True)
-                self.runCommand(
-                    ["cp", v_path, f"{nnunet_input}/{self._get_nnunet_input_name_for_temp_copy(file_prefix)}"],
-                    stream_output=True)
-
-                # Report progress for "Preparing files for prediction"
-                prepared_files_count += 1
-                if self.progress_callback:
-                    self.progress_callback(
-                        prepared_files_count,
-                        self.total_expected_files,
-                        os.path.basename(input_file),
-                        "Preparing files for prediction"  # New stage indicator
-                    )
-
-            logger.info("[INFO] Finished uploading and preprocessing.")
-
-            nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input, nnunet_output)
-            device_flag = self._get_device_flag(self.host_cfg)
-            nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
-            logger.info(f"[INFO] Running nnUNet command: {nnunet_cmd_full}")
-
-            nnunet_progress_pattern = r"done with (\S+)"
-
-            # nnUNet execution now directly reports progress via runCommand's streaming
-            nnunet_execution_thread = threading.Thread(target=self.runCommand,
-                                                       args=(nnunet_cmd_full, True, self.nnunet_process_finished_event,
-                                                             nnunet_progress_pattern, original_input_files_map))
-            nnunet_execution_thread.daemon = True
-            nnunet_execution_thread.start()
-
-            # wait for the nnUNet execution thread to complete
-            try:
-                nnunet_execution_thread.join()
-            except Exception as e:
-                logger.error(f"[ERROR] An error occurred in the remote nnUNet execution thread: {e}")
-                raise
-
-            logger.info("[INFO] nnUNet prediction command completed (execution thread finished).")
-
-            # post-processing (roi2rdf and copying to final output_dir)
-            rdf_processed_count = 0
-            for input_file in input_files:
-                if self.stop_event and self.stop_event.is_set():
-                    logger.info("[INFO] Remote prediction aborted by external signal during download/post-processing.")
-                    break
-
-                file_prefix = self.get_file_prefix(input_file)
-                remote_nnunet_v_path_in_temp, remote_rdf_path_in_temp = self._get_expected_full_paths_in_nnunet_output_dir(
-                    nnunet_output, file_prefix)
-
-                if self._check_file_existence(remote_nnunet_v_path_in_temp):
-                    self.runCommand([self.roi2rdf_path, remote_nnunet_v_path_in_temp], stream_output=True)
-                    try:
-                        self._wait_for_file_existence(remote_rdf_path_in_temp)
-                    except TimeoutError as e:
-                        logger.warning(f"Warning: {e}. RDF for {file_prefix} might be missing or delayed on remote.")
-
-                local_v_path = os.path.join(output_dir, f"{file_prefix}.v")
-                local_rdf_path = os.path.join(output_dir, self._get_roi2rdf_output_name_in_temp(file_prefix))
-
-                remote_v_path = f"{remote_temp}/{file_prefix}.v"  # This is the mic2ecat output .v file, not nnunet
-                if self._check_file_existence(remote_v_path) and not os.path.exists(local_v_path):
-                    self.sftp.get(remote_v_path, local_v_path)
-
-                if self._check_file_existence(remote_rdf_path_in_temp) and not os.path.exists(local_rdf_path):
-                    self.sftp.get(remote_rdf_path_in_temp, local_rdf_path)
-
-                if os.path.exists(local_rdf_path) and file_prefix not in self.reported_rdf_files:
-                    rdf_processed_count += 1
-                    self.reported_rdf_files.add(file_prefix)
-                    if self.progress_callback:
-                        self.progress_callback(
-                            rdf_processed_count,
-                            self.total_expected_files,
-                            os.path.basename(input_file),
-                            "Making ROI mask files"
-                        )
-                    logger.info(
-                        f"Reported RDF progress for {file_prefix}: {rdf_processed_count}/{self.total_expected_files}")
-
-            logger.info("[INFO] All files post-processed, downloaded, and progress confirmed.")
-
-            logger.info(f"[INFO] Cleaning up remote temporary directory: {remote_temp}")
-            self.runCommand(["rm", "-rf", remote_temp], stream_output=True)
-            logger.info("[INFO] Remote cleanup complete.")
-
-        except UserCancelledError:
-            logger.info("[INFO] Remote prediction cancelled by user.")
-            raise
-
+            with tarfile.open(fileobj=local_input_tar_fo, mode='w:gz') as tar:
+                for file_path in input_files:
+                    tar.add(file_path, arcname=os.path.basename(file_path))
         except Exception as e:
-            logger.error(f"[ERROR] An error occurred in MarAiRemote: {e}")
+            logger.error(f"[ERROR] Error creating in-memory tar archive: {e}")
+            self.runCommand(f"rm -rf {remote_temp}")
+            self.disconnect()
             raise
 
-        finally:
-            self.disconnect()
-            logger.info("[INFO] Disconnected from remote host.")
-            if remote_temp and self.connected:  # Check self.connected as disconnect might fail
-                try:
-                    self.runCommand(["rm", "-rf", remote_temp], stream_output=True)
-                    logger.info("[INFO] Remote cleanup complete in finally block.")
-                except Exception as cleanup_e:
-                    logger.warning(f"[WARNING] Failed to clean up remote temp dir {remote_temp}: {cleanup_e}")
+        # --- Upload the in-memory archive ---
+        local_input_tar_fo.seek(0)
+        remote_input_tar_path = f"{remote_temp}/input_{self.tempId}.tar.gz"
+        logger.info(f"[INFO] Uploading input archive to {remote_temp}...")
+        self.sftp.putfo(local_input_tar_fo, remote_input_tar_path)
+        logger.info("[INFO] Input archive uploaded.")
+
+        # --- Remote unpacking of input files ---
+        logger.info(f"[INFO] Extracting input files on remote host...")
+        self.runCommand(f"tar -xzf {remote_input_tar_path} -C {remote_temp}")
+
+        # --- Run mic2ecat in batch remotely ---
+        logger.info("[INFO] Running mic2ecat remotely on all files in temp dir...")
+        mic2ecat_cmd = f"cd {remote_temp} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        self.runCommand(mic2ecat_cmd, stream_output=True)
+
+        # --- Copy .v outputs into nnunet_input dir remotely ---
+        logger.info("[INFO] Moving and renaming mic2ecat outputs into nnunet_input directory...")
+
+        remote_copy_cmd = (
+            f"cd {remote_temp} && "
+            f"for file in *.v; do "
+            f"  prefix=$(basename $file .v); "
+            f"  mv -- \"$file\" \"{nnunet_input}/${{prefix}}_0000.v\"; "
+            f"done"
+        )
+        self.runCommand(remote_copy_cmd, stream_output=True)
+
+        # --- Run nnUNet remotely ---
+        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input, nnunet_output)
+        device_flag = self._get_device_flag(self.host_cfg)
+        nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
+        nnunet_progress_pattern = r"done with (\S+)"
+        nnunet_thread = threading.Thread(target=self.runCommand,
+                                         args=(nnunet_cmd_full, True, self.nnunet_process_finished_event,
+                                               nnunet_progress_pattern, original_input_files_map))
+        nnunet_thread.start()
+        nnunet_thread.join()
+
+        # --- Run roi2rdf in batch remotely ---
+        logger.info("[INFO] Running roi2rdf remotely on all files in nnunet output dir...")
+        roi2rdf_cmd = f"cd {nnunet_output} && {self.roi2rdf_path} *.v"
+        self.runCommand(roi2rdf_cmd, stream_output=True)
+
+        # --- Remote packaging of output files ---
+        logger.info("[INFO] Packaging output files for download...")
+
+        remote_output_tar_path = f"{remote_temp}/output_{self.tempId}.tar.gz"
+
+        remote_tar_cmd = (
+            f"cd {remote_temp} && "
+            f"tar -czf {remote_output_tar_path} "
+            f"-C {nnunet_input} . "
+            f"-C {nnunet_output} . "
+        )
+
+        self.runCommand(remote_tar_cmd, stream_output=True)
+
+        if self.progress_callback:
+            self.progress_callback(self.total_expected_files, self.total_expected_files, "Output files",
+                                   "Packaging results")
+
+        # --- Download the output archive into memory ---
+        logger.info(f"[INFO] Downloading output archive...")
+        local_output_tar_fo = io.BytesIO()
+        self.sftp.getfo(remote_output_tar_path, local_output_tar_fo)
+        logger.info("[INFO] Output archive downloaded.")
+
+        # --- Unpack the in-memory output archive ---
+        logger.info(f"[INFO] Unpacking output archive to {output_dir}...")
+        local_output_tar_fo.seek(0)
+        with tarfile.open(fileobj=local_output_tar_fo, mode='r:gz') as tar:
+            tar.extractall(path=output_dir)
+
+        # --- Rename the output files ---
+        logger.info("[INFO] Renaming nnUNet output files...")
+        try:
+            for filename in os.listdir(output_dir):
+                if filename.endswith('_0000.v'):
+                    new_filename = filename.replace('_0000.v', '.v')
+                    old_path = os.path.join(output_dir, filename)
+                    new_path = os.path.join(output_dir, new_filename)
+                    os.rename(old_path, new_path)
+        except Exception as e:
+            logger.error(f"[ERROR] Error renaming files: {e}")
+
+        # --- Cleanup ---
+        self.runCommand(f"rm -rf {remote_temp}")
+        self.disconnect()
