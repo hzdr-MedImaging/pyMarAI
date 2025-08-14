@@ -3,8 +3,8 @@ import os
 import subprocess
 import multiprocessing
 import logging
-import login
-import predict
+import pymarai.login
+import pymarai.predict
 import traceback
 import shutil
 import pmedio
@@ -18,7 +18,7 @@ import re
 from PyQt5 import QtCore
 from multiprocessing import Pipe
 
-from config import AppConfig
+from pymarai.config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QTableWidgetItem,
                              QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,

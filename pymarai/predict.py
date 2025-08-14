@@ -4,8 +4,8 @@ import argparse
 import traceback
 import logging
 import platform
-from marai import MarAiLocal, MarAiRemote
-from config import AppConfig
+from pymarai.marai import MarAiLocal, MarAiRemote
+from pymarai.config import AppConfig
 from multiprocessing import Event
 from multiprocessing.connection import Connection
 
