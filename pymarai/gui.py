@@ -23,7 +23,7 @@ from pymarai.config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QTableWidgetItem,
                              QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
-                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip)
+                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip, QSplitter)
 
 from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool
@@ -124,8 +124,6 @@ class PyMarAiGuiApp(QDialog):
         inputFilePathButtonsLayout.addStretch()
 
         self.inputFileListWidget = QListWidget()
-        self.inputFileListWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.inputFileListWidget.setFixedHeight(600)
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
@@ -137,10 +135,7 @@ class PyMarAiGuiApp(QDialog):
         inputFileSectionLayout.addLayout(inputFilePathButtonsLayout)
 
         # --- Image Preview Section ---
-        self.imagePreviewLabel = self.createLabel("Image Preview")
-        self.imagePreviewLabel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.imagePreviewLabel.setFixedHeight(600)
-        self.imagePreviewLabel.setMinimumWidth(800)
+        self.imagePreviewLabel = ScaledLabel("Image Preview")
         self.imagePreviewLabel.setAlignment(Qt.AlignCenter)
         self.imagePreviewLabel.setStyleSheet("""
             border: 1px solid #cccccc;
@@ -160,11 +155,9 @@ class PyMarAiGuiApp(QDialog):
         self.markBadButton.setToolTip(
             "Marks the currently selected file as BAD result of prediction. This action can also be triggered by pushing left arrow <-.")
 
-        imagePreviewContainerWidget = QWidget()
-        imagePreviewContainerLayout = QVBoxLayout(imagePreviewContainerWidget)
-
-        imagePreviewContainerLayout.addWidget(self.imageFilenameLabel, alignment=Qt.AlignCenter)
-        imagePreviewContainerLayout.addWidget(self.imagePreviewLabel)
+        imagePreviewContainerSubLayout = QVBoxLayout()
+        imagePreviewContainerSubLayout.addWidget(self.imageFilenameLabel, alignment=Qt.AlignCenter)
+        imagePreviewContainerSubLayout.addWidget(self.imagePreviewLabel)
 
         prevNextButtonsHLayout = QHBoxLayout()
         prevNextButtonsHLayout.addStretch()
@@ -173,7 +166,7 @@ class PyMarAiGuiApp(QDialog):
         prevNextButtonsHLayout.addWidget(self.markGoodButton)
         prevNextButtonsHLayout.addWidget(self.markBadButton)
         prevNextButtonsHLayout.addStretch()
-        imagePreviewContainerLayout.addLayout(prevNextButtonsHLayout)
+        imagePreviewContainerSubLayout.addLayout(prevNextButtonsHLayout)
 
         # --- Mask Buttons and Mask Display Options ---
         self.applyMaskButton = self.createButton("Apply Mask", self.applyPredictionMask)
@@ -182,15 +175,28 @@ class PyMarAiGuiApp(QDialog):
         maskButtonsHLayout = QHBoxLayout()
         maskButtonsHLayout.addWidget(self.applyMaskButton)
         maskButtonsHLayout.addWidget(self.removeMaskButton)
-        maskButtonsHLayout.addStretch()
 
         mask_options_group_box = self.setupMaskDisplayOptions("prediction")
 
-        maskControlsVWidget = QWidget()
-        maskControlsVLayout = QVBoxLayout(maskControlsVWidget)
+        zoomInButton = self.createButton("+", self.imagePreviewLabel.zoomIn)
+        zoomOutButton = self.createButton("-", self.imagePreviewLabel.zoomOut)
+
+        zoomLevelGroupBox = QGroupBox("Image Zoom:")
+        zoomLevelGroupBoxLayout = QHBoxLayout(zoomLevelGroupBox)
+        zoomLevelGroupBoxLayout.addWidget(zoomInButton)
+        zoomLevelGroupBoxLayout.addWidget(zoomOutButton)
+
+        maskControlsVLayout = QVBoxLayout()
         maskControlsVLayout.addSpacing(21)
         maskControlsVLayout.addLayout(maskButtonsHLayout)
         maskControlsVLayout.addWidget(mask_options_group_box)
+        maskControlsVLayout.addWidget(zoomLevelGroupBox)
+        maskControlsVLayout.addStretch()
+
+        imagePreviewContainerWidget = QWidget()
+        imagePreviewContainerLayout = QHBoxLayout(imagePreviewContainerWidget)
+        imagePreviewContainerLayout.addLayout(imagePreviewContainerSubLayout)
+        imagePreviewContainerLayout.addLayout(maskControlsVLayout)
 
         # --- Analysed Files Toolbox ---
         self.statusToolsGroup = QGroupBox("Status Tools")
@@ -267,25 +273,28 @@ class PyMarAiGuiApp(QDialog):
         predictionLogLayout.addWidget(progressLabel)
         predictionLogLayout.addWidget(self.progressPlainTextEdit)
 
+        # Create horizontal splitter to divide top area
+        topSplitterWidget = QSplitter(Qt.Orientation.Horizontal)
+        topSplitterWidget.addWidget(inputFileSectionWidget)
+        topSplitterWidget.addWidget(imagePreviewContainerWidget)
+
+        # Create bottom layout part
+        predictionControlWidget = QWidget()
+        predictionControlLayout = QVBoxLayout(predictionControlWidget)
+        predictionControlLayout.addWidget(statusToolsWidget)
+        predictionControlLayout.addWidget(microscopeWidget)
+        predictionControlLayout.addWidget(predictionRunWidget)
+        predictionControlLayout.addWidget(predictionLogWidget)
+
+        # Create horizontal splitter to divide top area
+        bottomSplitterWidget = QSplitter(Qt.Orientation.Vertical)
+        bottomSplitterWidget.setStyleSheet('QSplitter::handle {border: 2px solid lightgrey; }')
+        bottomSplitterWidget.addWidget(topSplitterWidget)
+        bottomSplitterWidget.addWidget(predictionControlWidget)
+
         # --- Main Prediction Tab Layout ---
-        prediction_tab_layout = QGridLayout(self.prediction_tab)
-
-        current_row = 0
-        prediction_tab_layout.addWidget(inputFileSectionWidget, current_row, 0, 1, 1)
-        prediction_tab_layout.addWidget(imagePreviewContainerWidget, current_row, 1, 1, 2)
-        prediction_tab_layout.addWidget(maskControlsVWidget, current_row, 3, 1, 1, Qt.AlignRight | Qt.AlignTop)
-
-        current_row += 1
-        prediction_tab_layout.addWidget(statusToolsWidget, current_row, 0, 1, 3)
-
-        current_row += 1
-        prediction_tab_layout.addWidget(microscopeWidget, current_row, 0)
-
-        current_row += 1
-        prediction_tab_layout.addWidget(predictionRunWidget, current_row, 0, 1, 2)
-
-        current_row += 1
-        prediction_tab_layout.addWidget(predictionLogWidget, current_row, 0, 1, 4)
+        prediction_tab_layout = QVBoxLayout(self.prediction_tab)
+        prediction_tab_layout.addWidget(bottomSplitterWidget)
 
     # sets up the layout and widgets for the re-training tab
     def setupRetrainTab(self):
@@ -317,8 +326,8 @@ class PyMarAiGuiApp(QDialog):
 
         # --- Image Preview Section ---
         self.retrainImagePreviewLabel = self.createLabel("Image Preview")
-        self.retrainImagePreviewLabel.setFixedHeight(600)
-        self.retrainImagePreviewLabel.setMinimumWidth(800)
+        #self.retrainImagePreviewLabel.setFixedHeight(600)
+        #self.retrainImagePreviewLabel.setMinimumWidth(800)
         self.retrainImagePreviewLabel.setAlignment(Qt.AlignCenter)
         self.retrainImagePreviewLabel.setStyleSheet("""
             border: 1px solid #cccccc;
@@ -1101,27 +1110,9 @@ class PyMarAiGuiApp(QDialog):
                               QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimg)
 
-            fixed_height = 600
-            aspect_ratio = pixmap.width() / pixmap.height()
-            new_width = int(fixed_height * aspect_ratio)
-
-            self.imagePreviewLabel.setFixedSize(new_width, fixed_height)
-
-            scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            rounded_pixmap = QPixmap(scaled_pixmap.size())
-            rounded_pixmap.fill(Qt.transparent)
-
-            painter = QPainter(rounded_pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            path = QPainterPath()
-            radius = 8
-            path.addRoundedRect(0, 0, scaled_pixmap.width(), scaled_pixmap.height(), radius, radius)
-            painter.setClipPath(path)
-            painter.drawPixmap(0, 0, scaled_pixmap)
-            painter.end()
-
-            self.imagePreviewLabel.setPixmap(rounded_pixmap)
+            self.imagePreviewLabel.setPixmap(pixmap)
+            self.imagePreviewLabel.setMinimumWidth(100)
+            self.imagePreviewLabel.setMinimumHeight(100)
             self.imagePreviewLabel.setText("")
 
             if self.current_preview_filename in self.predictionMaskedPixmaps:
@@ -2756,6 +2747,36 @@ class FileStatusWorker(QThread):
 
         self.finished_all.emit()
 
+class ScaledLabel(QLabel):
+    def __init__(self, *args, **kwargs):
+        QLabel.__init__(self)
+        self.zoom_factor = 1
+        self._pixmap = None
+        if self.pixmap():
+            self._pixmap = QPixmap(self.pixmap())
+
+    def setPixmap(self, pixmap):
+        self._pixmap = pixmap
+        self.updatePixmap()
+
+    def setZoom(self, zoom_factor):
+        self.zoom_factor = zoom_factor
+        self.updatePixmap()
+
+    def zoomIn(self):
+        if self.zoom_factor < 10:
+          self.setZoom(self.zoom_factor+1)
+
+    def zoomOut(self):
+        if self.zoom_factor > 1:
+          self.setZoom(self.zoom_factor-1)
+
+    def updatePixmap(self):
+        if self._pixmap is not None:
+            QLabel.setPixmap(self, self._pixmap.scaled(self.width()*self.zoom_factor, self.height()*self.zoom_factor, Qt.KeepAspectRatio))
+
+    def resizeEvent(self, event):
+        self.updatePixmap()
 
 # main function to start GUI
 def main():
