@@ -2021,12 +2021,26 @@ class PyMarAiGuiApp(QDialog):
         if self.tabType == "prediction":
             if event.key() == Qt.Key_Right:
                 self.markFileAsGood()
+                return
             elif event.key() == Qt.Key_Left:
                 self.markFileAsBad()
-            else:
-                super().keyPressEvent(event)
+                return
+            elif event.key() == Qt.Key_Up:
+                self.showPreviousImage()
+                return
+            elif event.key() == Qt.Key_Down:
+                self.showNextImage()
+                return
         else:
-            super().keyPressEvent(event)
+            if event.key() == Qt.Key_Up:
+                self.showPreviousRetrainImage()
+                return
+            elif event.key() == Qt.Key_Down:
+                self.showNextRetrainImage()
+                return
+
+        # fall back to default handling for other keys
+        super().keyPressEvent(event)
 
     # mark the current file as "good"
     def markFileAsGood(self):
