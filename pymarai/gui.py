@@ -142,6 +142,7 @@ class PyMarAiGuiApp(QDialog):
             background-color: #fafafa;
             border-radius: 6px;
         """)
+        self.imagePreviewLabel.zoom_changed_signal.connect(self.setZoomPercentageLabel)
 
         self.imageFilenameLabel = self.createLabel("No file selected")
         self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum);
@@ -180,17 +181,17 @@ class PyMarAiGuiApp(QDialog):
 
         mask_options_group_box = self.setupMaskDisplayOptions("prediction")
 
-        zoom_percent_label = QLabel("100%")
-        zoom_percent_label.setAlignment(Qt.AlignCenter)
-        zoomInButton = self.createButton("+", lambda: self.adjust_zoom(1))
-        zoomOutButton = self.createButton("-", lambda: self.adjust_zoom(-1))
+        self.zoom_percent_label = QLabel("100%")
+        self.zoom_percent_label.setAlignment(Qt.AlignCenter)
+        zoomInButton = self.createButton("+", self.imagePreviewLabel.zoomIn)
+        zoomOutButton = self.createButton("-", self.imagePreviewLabel.zoomOut)
 
         zoom_buttons_layout = QHBoxLayout()
         zoom_buttons_layout.addWidget(zoomOutButton)
         zoom_buttons_layout.addWidget(zoomInButton)
 
         zoom_main_layout = QVBoxLayout()
-        zoom_main_layout.addWidget(zoom_percent_label)
+        zoom_main_layout.addWidget(self.zoom_percent_label)
         zoom_main_layout.addLayout(zoom_buttons_layout)
 
         zoomLevelGroupBox = QGroupBox("Image Zoom:")
@@ -780,6 +781,11 @@ class PyMarAiGuiApp(QDialog):
     # removes _m<number> from the end of filename (before extension)
     def stripMicroscopeTag(self, filename):
         return re.sub(r"_m\d+$", "", filename)
+
+    # update the text of the zoom_percent_label with the new percentage
+    def setZoomPercentageLabel(self, zoom_factor):
+        percentage = int(zoom_factor * 100)
+        self.zoom_percent_label.setText(f"{percentage}%")
 
     # opens a dialog to select the input directory for predictions
     def loadInputDirectory(self):
@@ -2792,6 +2798,8 @@ class FileStatusWorker(QThread):
         self.finished_all.emit()
 
 class ScaledLabel(QLabel):
+    zoom_changed_signal = pyqtSignal(float)
+
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
@@ -2807,18 +2815,19 @@ class ScaledLabel(QLabel):
     def setZoom(self, zoom_factor):
         self.zoom_factor = zoom_factor
         self.updatePixmap()
+        self.zoom_changed_signal.emit(self.zoom_factor)
 
     def zoomIn(self):
         if self.zoom_factor < 10:
-          self.setZoom(self.zoom_factor+1)
+            self.setZoom(self.zoom_factor + 1)
 
     def zoomOut(self):
         if self.zoom_factor > 1:
-          self.setZoom(self.zoom_factor-1)
+            self.setZoom(self.zoom_factor - 1)
 
     def updatePixmap(self):
         if self._pixmap is not None:
-            QLabel.setPixmap(self, self._pixmap.scaled(self.width()*self.zoom_factor, self.height()*self.zoom_factor, Qt.KeepAspectRatio))
+            QLabel.setPixmap(self, self._pixmap.scaled(self.width() * self.zoom_factor, self.height() * self.zoom_factor, Qt.KeepAspectRatio))
 
     def resizeEvent(self, event):
         self.updatePixmap()
