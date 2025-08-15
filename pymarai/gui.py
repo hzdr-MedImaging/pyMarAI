@@ -180,13 +180,21 @@ class PyMarAiGuiApp(QDialog):
 
         mask_options_group_box = self.setupMaskDisplayOptions("prediction")
 
-        zoomInButton = self.createButton("+", self.imagePreviewLabel.zoomIn)
-        zoomOutButton = self.createButton("-", self.imagePreviewLabel.zoomOut)
+        zoom_percent_label = QLabel("100%")
+        zoom_percent_label.setAlignment(Qt.AlignCenter)
+        zoomInButton = self.createButton("+", lambda: self.adjust_zoom(1))
+        zoomOutButton = self.createButton("-", lambda: self.adjust_zoom(-1))
+
+        zoom_buttons_layout = QHBoxLayout()
+        zoom_buttons_layout.addWidget(zoomOutButton)
+        zoom_buttons_layout.addWidget(zoomInButton)
+
+        zoom_main_layout = QVBoxLayout()
+        zoom_main_layout.addWidget(zoom_percent_label)
+        zoom_main_layout.addLayout(zoom_buttons_layout)
 
         zoomLevelGroupBox = QGroupBox("Image Zoom:")
-        zoomLevelGroupBoxLayout = QHBoxLayout(zoomLevelGroupBox)
-        zoomLevelGroupBoxLayout.addWidget(zoomInButton)
-        zoomLevelGroupBoxLayout.addWidget(zoomOutButton)
+        zoomLevelGroupBox.setLayout(zoom_main_layout)
 
         maskControlsVLayout = QVBoxLayout()
         maskControlsVLayout.addSpacing(21)
