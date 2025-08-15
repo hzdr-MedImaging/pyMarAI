@@ -1595,7 +1595,8 @@ class PyMarAiGuiApp(QDialog):
         self.showRetrainImageAtIndex(self.retrainPreviewIndex)
 
     def showNextImage(self):
-        if self.previewList:
+        if self.previewList and len(self.previewList) > 1:
+            # multi-selection behavior
             self.previewIndex = (self.previewIndex + 1) % len(self.previewList)
             self.showImageAtIndex(self.previewIndex)
         else:
@@ -1609,9 +1610,19 @@ class PyMarAiGuiApp(QDialog):
             self.updatePreviewList()
 
     def showPreviousImage(self):
-        if self.previewList:
+        if self.previewList and len(self.previewList) > 1:
+            # multi-selection behavior
             self.previewIndex = (self.previewIndex - 1 + len(self.previewList)) % len(self.previewList)
             self.showImageAtIndex(self.previewIndex)
+        else:
+            # navigate through entire list if only one file was selected
+            count = self.inputFileListWidget.count()
+            if count == 0:
+                return
+            current_row = self.inputFileListWidget.currentRow()
+            prev_row = (current_row - 1 + count) % count
+            self.inputFileListWidget.setCurrentRow(prev_row)
+            self.updatePreviewList()
 
     def updatePreviewImage(self):
         if not self.currentImage:
