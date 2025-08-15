@@ -1598,6 +1598,15 @@ class PyMarAiGuiApp(QDialog):
         if self.previewList:
             self.previewIndex = (self.previewIndex + 1) % len(self.previewList)
             self.showImageAtIndex(self.previewIndex)
+        else:
+            # navigate through entire list if only one file was selected
+            count = self.inputFileListWidget.count()
+            if count == 0:
+                return
+            current_row = self.inputFileListWidget.currentRow()
+            next_row = (current_row + 1) % count
+            self.inputFileListWidget.setCurrentRow(next_row)
+            self.updatePreviewList()
 
     def showPreviousImage(self):
         if self.previewList:
