@@ -144,7 +144,9 @@ class PyMarAiGuiApp(QDialog):
         """)
 
         self.imageFilenameLabel = self.createLabel("No file selected")
+        self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum);
         self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
+        self.imageFilenameLabel.setMaximumHeight(16)
 
         self.prevButton = self.createButton("↑ Previous", self.showPreviousImage)
         self.nextButton = self.createButton("Next ↓", self.showNextImage)
@@ -156,7 +158,7 @@ class PyMarAiGuiApp(QDialog):
             "Marks the currently selected file as BAD result of prediction. This action can also be triggered by pushing left arrow <-.")
 
         imagePreviewContainerSubLayout = QVBoxLayout()
-        imagePreviewContainerSubLayout.addWidget(self.imageFilenameLabel, alignment=Qt.AlignCenter)
+        imagePreviewContainerSubLayout.addWidget(self.imageFilenameLabel)
         imagePreviewContainerSubLayout.addWidget(self.imagePreviewLabel)
 
         prevNextButtonsHLayout = QHBoxLayout()
@@ -2749,7 +2751,8 @@ class FileStatusWorker(QThread):
 
 class ScaledLabel(QLabel):
     def __init__(self, *args, **kwargs):
-        QLabel.__init__(self)
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.zoom_factor = 1
         self._pixmap = None
         if self.pixmap():
