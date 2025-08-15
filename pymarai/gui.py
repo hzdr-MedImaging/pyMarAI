@@ -183,12 +183,12 @@ class PyMarAiGuiApp(QDialog):
 
         self.zoom_percent_label = QLabel("100%")
         self.zoom_percent_label.setAlignment(Qt.AlignCenter)
-        zoomInButton = self.createButton("+", self.imagePreviewLabel.zoomIn)
-        zoomOutButton = self.createButton("-", self.imagePreviewLabel.zoomOut)
+        self.zoomInButton = self.createButton("+", self.imagePreviewLabel.zoomIn)
+        self.zoomOutButton = self.createButton("-", self.imagePreviewLabel.zoomOut)
 
         zoom_buttons_layout = QHBoxLayout()
-        zoom_buttons_layout.addWidget(zoomOutButton)
-        zoom_buttons_layout.addWidget(zoomInButton)
+        zoom_buttons_layout.addWidget(self.zoomOutButton)
+        zoom_buttons_layout.addWidget(self.zoomInButton)
 
         zoom_main_layout = QVBoxLayout()
         zoom_main_layout.addWidget(self.zoom_percent_label)
@@ -600,6 +600,9 @@ class PyMarAiGuiApp(QDialog):
         self.prediction_gradient_checkbox.setEnabled(enable)
         self.prediction_filled_checkbox.setEnabled(enable)
         self.prediction_contour_checkbox.setEnabled(enable)
+
+        self.zoomInButton.setEnabled(enable)
+        self.zoomOutButton.setEnabled(enable)
 
         self.prediction_gradient_colormap_combo.setEnabled(enable and self.prediction_gradient_checkbox.isChecked())
         self.prediction_filled_color_button.setEnabled(enable and self.prediction_filled_checkbox.isChecked())
@@ -1957,7 +1960,7 @@ class PyMarAiGuiApp(QDialog):
                             data_row = line.strip().split()
                             if data_row:
                                 # clean the filename before appending it to the table_data
-                                cleaned_filename = re.sub(r'_m\d+_(GOOD|BAD)', '', data_row[0])
+                                cleaned_filename = re.sub(r'_(GOOD|BAD)', '', data_row[0])
                                 data_row[0] = cleaned_filename
                                 table_data.append(data_row)
 
