@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import tarfile
-import tempfile
 import platform
 import yaml
 import paramiko
@@ -60,18 +59,9 @@ class MarAiBase(ABC):
 
         # get nnunet section from config
         self.nnunet_cfg = self.cfg.get('nnunet', {})
-        self.localTempDir = tempfile.TemporaryDirectory(prefix="marai-")
-        self.tempId = self.localTempDir.name.split('-')[1]
 
         # Event to signal when nnUNet process itself has finished
         self.nnunet_process_finished_event = threading.Event()
-
-    # clean up temporary directory
-    def __del__(self):
-        try:
-            self.localTempDir.cleanup()
-        except Exception as e:
-            logger.warning(f"[ERROR] Error cleaning up local temporary directory {self.localTempDir.name}: {e}")
 
     # config file loader
     def _load_config(self, cfg_path):
@@ -230,9 +220,11 @@ class MarAiLocal(MarAiBase):
             logger.info("Local prediction aborted before start.")
             return
 
-        nnunet_input_dir = os.path.join(self.localTempDir.name, "nnunet_input")
-        nnunet_output_dir = os.path.join(self.localTempDir.name, "nnunet_output")
+        tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
+        os.makedirs(tempDir, exist_ok=True)
+        nnunet_input_dir = os.path.join(tempDir, "nnunet_input")
         os.makedirs(nnunet_input_dir, exist_ok=True)
+        nnunet_output_dir = os.path.join(tempDir, "nnunet_output")
         os.makedirs(nnunet_output_dir, exist_ok=True)
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
@@ -240,17 +232,17 @@ class MarAiLocal(MarAiBase):
         # --- Copy input files to temp dir ---
         logger.info("Copying input files to temporary directory...")
         for input_file in input_files:
-            shutil.copy(input_file, os.path.join(self.localTempDir.name, os.path.basename(input_file)))
+            shutil.copy(input_file, os.path.join(tempDir, os.path.basename(input_file)))
 
         # --- Run mic2ecat ---
         logger.info("Running mic2ecat on all files in temp dir...")
-        mic2ecat_cmd = f"cd {self.localTempDir.name} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
         # --- Move mic2ecat .v outputs into nnunet_input ---
         logger.info("Moving and renaming mic2ecat outputs into nnunet_input directory...")
         move_cmd = (
-            f"cd {self.localTempDir.name} && "
+            f"cd {tempDir} && "
             f"for file in *.v; do "
             f"  prefix=$(basename \"$file\" .v); "
             f"  mv -- \"$file\" \"{nnunet_input_dir}/${{prefix}}_0000.v\"; "
@@ -325,8 +317,6 @@ class MarAiRemote(MarAiBase):
 
         if not self.hostname:
             raise ValueError("[ERROR] Hostname not specified or found in configuration.\n")
-
-        self.tempId = f"{os.getpid()}-{threading.get_ident()}"
 
         self.connected = False
         self.ssh = paramiko.SSHClient()
@@ -486,10 +476,10 @@ class MarAiRemote(MarAiBase):
             return
 
         self.connect()
-        remote_temp = f"/tmp/marai-{self.tempId}"
-        nnunet_input = f"{remote_temp}/nnunet_input"
-        nnunet_output = f"{remote_temp}/nnunet_output"
-        self.runCommand(["mkdir", "-p", remote_temp, nnunet_input, nnunet_output])
+        tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
+        nnunet_input = os.path.join(tempDir, "nnunet_input")
+        nnunet_output = os.path.join(tempDir, "nnunet_output")
+        self.runCommand(["mkdir", "-p", tempDir, nnunet_input, nnunet_output])
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
@@ -502,27 +492,27 @@ class MarAiRemote(MarAiBase):
                     tar.add(file_path, arcname=os.path.basename(file_path))
         except Exception as e:
             logger.error(f"[ERROR] Error creating in-memory tar archive: {e}")
-            self.runCommand(f"rm -rf {remote_temp}")
+            self.runCommand(f"rm -rf {tempDir}")
             self.disconnect()
             raise
 
         # --- Upload archive ---
         local_input_tar_fo.seek(0)
-        remote_input_tar_path = f"{remote_temp}/input_{self.tempId}.tar.gz"
-        logger.info(f"Uploading input archive to {remote_temp}...")
+        remote_input_tar_path = os.path.join(tempDir, "input.tar.gz")
+        logger.info(f"Uploading input archive to {tempDir}...")
         self.sftp.putfo(local_input_tar_fo, remote_input_tar_path)
 
         # --- Extract on remote ---
         logger.info(f"Extracting input files on remote host...")
-        self.runCommand(f"tar -xzf {remote_input_tar_path} -C {remote_temp}")
+        self.runCommand(f"tar -xzf {remote_input_tar_path} -C {tempDir}")
 
         # --- Run mic2ecat ---
-        mic2ecat_cmd = f"cd {remote_temp} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
         # --- Move mic2ecat outputs into nnunet_input ---
         remote_copy_cmd = (
-            f"cd {remote_temp} && "
+            f"cd {tempDir} && "
             f"for file in *.v; do "
             f"  prefix=$(basename $file .v); "
             f"  mv -- \"$file\" \"{nnunet_input}/${{prefix}}_0000.v\"; "
@@ -563,7 +553,7 @@ class MarAiRemote(MarAiBase):
         self.runCommand(remote_rename_cmd, stream_output=True)
 
         # --- Package renamed raw .v + rdf outputs only ---
-        remote_output_tar_path = f"{remote_temp}/output_{self.tempId}.tar"
+        remote_output_tar_path = f"{tempDir}/output.tar"
         remote_tar_cmd = (
             f"cd {nnunet_input} && tar -cf {remote_output_tar_path} . && "
             f"cd {nnunet_output} && "
@@ -587,5 +577,5 @@ class MarAiRemote(MarAiBase):
             tar.extractall(path=output_dir)
 
         # --- Cleanup ---
-        self.runCommand(f"rm -rf {remote_temp}")
+        self.runCommand(f"rm -rf {tempDir}")
         self.disconnect()

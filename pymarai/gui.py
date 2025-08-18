@@ -1322,7 +1322,7 @@ class PyMarAiGuiApp(QMainWindow):
             signals.errorOccurred.emit(f"[ERROR] Failed to get timestamp for {v_file_path_in_output}: {e}\n")
             raise
 
-        cache_dir = "/tmp/marai_cnn_masks_prediction"
+        cache_dir = os.path.join(self.hiddenOutputDir, "cnn_masks_prediction")
         os.makedirs(cache_dir, exist_ok=True)
         cached_mask_name = f"{matched_base}_{v_file_timestamp}_cnn.v"
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
@@ -1411,7 +1411,7 @@ class PyMarAiGuiApp(QMainWindow):
                 signals.errorOccurred.emit(f"[ERROR] Failed to get timestamp: {e}\n")
             raise
 
-        cache_dir = "/tmp/marai_cnn_masks_retrain"
+        cache_dir = os.path.join(self.hiddenOutputDir, "cnn_masks_retrain")
         os.makedirs(cache_dir, exist_ok=True)
         cached_mask_name = f"{base_name}_{v_file_timestamp}_cnn.v"
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
