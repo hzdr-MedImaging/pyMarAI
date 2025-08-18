@@ -1,7 +1,6 @@
 import os
 import shutil
 import subprocess
-import tarfile
 import platform
 import yaml
 import paramiko
@@ -38,7 +37,6 @@ class MarAiBase(ABC):
         self.roi2rdf_config_path = None
         self.base_temp_dir = None
         self.temp_inference_dir = None
-        self.sftp = None
 
         self.progress_callback = None
         self.processed_files_count = 0
@@ -108,9 +106,6 @@ class MarAiBase(ABC):
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
         raise NotImplementedError
 
-    def _list_directory(self, directory_path):
-        raise NotImplementedError
-
     # returns the base filename without extension
     def get_file_prefix(self, input_file):
         return os.path.splitext(os.path.basename(input_file))[0]
@@ -132,28 +127,6 @@ class MarAiBase(ABC):
         nnunet_v_path_in_temp = os.path.join(nnunet_output_dir, self._get_nnunet_output_name_in_temp(file_prefix))
         rdf_path_in_temp = os.path.join(nnunet_output_dir, self._get_roi2rdf_output_name_in_temp(file_prefix))
         return nnunet_v_path_in_temp, rdf_path_in_temp
-
-    # wait for a file to exist with a timeout
-    def _wait_for_file_existence(self, file_path, timeout=300, check_interval=5):
-        start_time = time.time()
-        while not self._check_file_existence(file_path):
-            if time.time() - start_time > timeout:
-                raise TimeoutError(f"[ERROR] Timeout waiting for file: {file_path}")
-            time.sleep(check_interval)
-        return True
-
-    # abstract method for checking file existence
-    def _check_file_existence(self, file_path):
-        raise NotImplementedError
-
-    # The _monitor_nnunet_output method has been removed.
-    # Progress for nnUNet is now directly reported from runCommand by parsing its stdout.
-
-    def _get_file_size(self, file_path, is_remote):
-        if is_remote:
-            return self.sftp.stat(file_path).st_size
-        else:
-            return os.path.getsize(file_path)
 
 class MarAiLocal(MarAiBase):
     def __init__(self, cfg_path=None, stop_event=None):
@@ -202,12 +175,6 @@ class MarAiLocal(MarAiBase):
             process_event_on_completion.set()  # signal that this command has completed
 
 
-    def _check_file_existence(self, file_path):
-        return os.path.exists(file_path)
-
-    def _list_directory(self, directory_path):
-        return os.listdir(directory_path)
-
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
         self.progress_callback = progress_callback
         self.total_expected_files = len(input_files)
@@ -229,10 +196,11 @@ class MarAiLocal(MarAiBase):
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
-        # --- Copy input files to temp dir ---
-        logger.info("Copying input files to temporary directory...")
+        # create soft links in our tempDir which will point to the
+        # correct original tif files just two directories lower than tempDir
+        logger.info("Soft linking input files to temporary directory...")
         for input_file in input_files:
-            shutil.copy(input_file, os.path.join(tempDir, os.path.basename(input_file)))
+            os.symlink(os.path.join("..", "..", os.path.basename(input_file)), os.path.join(tempDir, os.path.basename(input_file)))
 
         # --- Run mic2ecat ---
         logger.info("Running mic2ecat on all files in temp dir...")
@@ -321,7 +289,6 @@ class MarAiRemote(MarAiBase):
         self.connected = False
         self.ssh = paramiko.SSHClient()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.sftp = None
         self.ssh_keys = ssh_keys
 
     def __del__(self):
@@ -365,25 +332,18 @@ class MarAiRemote(MarAiBase):
                     self.ssh.connect(self.hostname, port=22, username=self.username, password=self.password)
                     logger.info(f"Connection successful via password authentication")
 
-                self.sftp = self.ssh.open_sftp()
                 self.connected = True
             except Exception as e:
                 logger.error(f"Connection failed: {e}")
 
     def disconnect(self):
         if self.connected:
-            if self.sftp:
-                try:
-                    self.sftp.close()
-                except Exception as e:
-                    logger.warning(f"[ERROR] Error closing SFTP client: {e}")
             if self.ssh: # check if ssh object exists before closing
                 try:
                     self.ssh.close()
                 except Exception as e:
                     logger.warning(f"[ERROR] Error closing SSH client: {e}")
         self.connected = False
-        self.sftp = None
 
         # reinit ssh client for next connection
         self.ssh = paramiko.SSHClient()
@@ -450,23 +410,6 @@ class MarAiRemote(MarAiBase):
         if process_event_on_completion:
             process_event_on_completion.set()
 
-    def _check_file_existence(self, file_path):
-        if not self.sftp:
-            raise RuntimeError("[ERROR] SFTP client not connected.")
-        try:
-            self.sftp.stat(file_path)
-            return True
-        except FileNotFoundError:
-            return False
-        except Exception as e:
-            logger.error(f"[ERROR] Error checking remote file existence for {file_path}: {e}")
-            return False
-
-    def _list_directory(self, directory_path):
-        if not self.sftp:
-            raise RuntimeError("[ERROR] SFTP client not connected.")
-        return self.sftp.listdir(directory_path)
-
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
         self.progress_callback = progress_callback
         self.total_expected_files = len(input_files)
@@ -481,53 +424,38 @@ class MarAiRemote(MarAiBase):
 
         tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
         os.makedirs(tempDir, exist_ok=True)
-        nnunet_input = os.path.join(tempDir, "nnunet_input")
-        os.makedirs(nnunet_input, exist_ok=True)
-        nnunet_output = os.path.join(tempDir, "nnunet_output")
-        os.makedirs(nnunet_output, exist_ok=True)
+        nnunet_input_dir = os.path.join(tempDir, "nnunet_input")
+        os.makedirs(nnunet_input_dir, exist_ok=True)
+        nnunet_output_dir = os.path.join(tempDir, "nnunet_output")
+        os.makedirs(nnunet_output_dir, exist_ok=True)
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
-        # --- In-memory packaging of input files ---
-        self.connect()
-        logger.info(f"Packaging {len(input_files)} files for in-memory upload...")
-        local_input_tar_fo = io.BytesIO()
-        try:
-            with tarfile.open(fileobj=local_input_tar_fo, mode='w:gz') as tar:
-                for file_path in input_files:
-                    tar.add(file_path, arcname=os.path.basename(file_path))
-        except Exception as e:
-            logger.error(f"[ERROR] Error creating in-memory tar archive: {e}")
-            self.runCommand(f"rm -rf {tempDir}")
-            self.disconnect()
-            raise
-
-        # --- Upload archive ---
-        local_input_tar_fo.seek(0)
-        remote_input_tar_path = os.path.join(tempDir, "input.tar.gz")
-        logger.info(f"Uploading input archive to {tempDir}...")
-        self.sftp.putfo(local_input_tar_fo, remote_input_tar_path)
-
-        # --- Extract on remote ---
-        logger.info(f"Extracting input files on remote host...")
-        self.runCommand(f"tar -xzf {remote_input_tar_path} -C {tempDir}")
+        # create soft links in our tempDir which will point to the
+        # correct original tif files just two directories lower than tempDir
+        logger.info("Soft linking input files to temporary directory...")
+        for input_file in input_files:
+            os.symlink(os.path.join("..", "..", os.path.basename(input_file)), os.path.join(tempDir, os.path.basename(input_file)))
 
         # --- Run mic2ecat ---
+        logger.info("Running mic2ecat...")
         mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
-        # --- Move mic2ecat outputs into nnunet_input ---
-        remote_copy_cmd = (
-            f"cd {tempDir} && "
-            f"for file in *.v; do "
-            f"  prefix=$(basename $file .v); "
-            f"  mv -- \"$file\" \"{nnunet_input}/${{prefix}}_0000.v\"; "
-            f"done"
-        )
-        self.runCommand(remote_copy_cmd, stream_output=True)
+        # --- Symlink mic2ecat output in nnunet_input_dir ---
+        logger.info("Soft linking mic2ecat output to nnunet_input_dir...")
+        for filename in os.listdir(tempDir):
+            old_path = os.path.join("..", filename)
+            if filename.endswith('.v'):
+                base = os.path.basename(filename)[:-2]
+                new_filename = f"{base}_0000.v"
+            else:
+                continue
+            os.symlink(old_path, os.path.join(nnunet_input_dir, new_filename))
+            logger.debug(f"Symlink {os.path.join(nnunet_input_dir, new_filename)} → {old_path}")
 
         # --- Run nnUNet ---
-        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input, nnunet_output)
+        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
         device_flag = self._get_device_flag(self.host_cfg)
         nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
         nnunet_progress_pattern = r"done with (\S+)"
@@ -538,50 +466,32 @@ class MarAiRemote(MarAiBase):
         nnunet_thread.join()
 
         # --- Run roi2rdf ---
-        roi2rdf_cmd = f"cd {nnunet_output} && {self.roi2rdf_path} *.v"
+        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
         self.runCommand(roi2rdf_cmd, stream_output=True)
 
-        # --- Rename raw .v in nnunet_input and rdf in nnunet_output ---
-        logger.info("Renaming raw .v + rdf on remote host...")
-        remote_rename_cmd = (
-            f"cd {nnunet_input} && "
-            f"for f in *.v; do "
-            f"  case $f in "
-            f"    *_0000.v) base=${{f%%_0000.v}}; mv \"$f\" \"${{base}}_m{microscope_number}.v\" ;; "
-            f"    *.v) base=${{f%%.v}}; mv \"$f\" \"${{base}}_m{microscope_number}.v\" ;; "
-            f"  esac; "
-            f"done; "
-            f"cd {nnunet_output} && "
-            f"for f in *.rdf; do "
-            f"  base=${{f%%.rdf}}; mv \"$f\" \"${{base}}_m{microscope_number}.rdf\"; "
-            f"done"
-        )
-        self.runCommand(remote_rename_cmd, stream_output=True)
+        # --- Move raw _0000.v from tempDir to output_dir ---
+        logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
+        for filename in os.listdir(tempDir):
+            old_path = os.path.join(tempDir, filename)
+            if filename.endswith('.v'):
+                base = os.path.basename(filename)[:-2]
+                new_filename = f"{base}_m{microscope_number}.v"
+            else:
+                continue
+            os.rename(old_path, os.path.join(output_dir, new_filename))
+            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
 
-        # --- Package renamed raw .v + rdf outputs only ---
-        remote_output_tar_path = f"{tempDir}/output.tar"
-        remote_tar_cmd = (
-            f"cd {nnunet_input} && tar -cf {remote_output_tar_path} . && "
-            f"cd {nnunet_output} && "
-            f"rdf_files=$(ls *.rdf 2>/dev/null || true); "
-            f"if [ -n \"$rdf_files\" ]; then "
-            f"tar --append -f {remote_output_tar_path} $rdf_files; "
-            f"fi && "
-            f"gzip -f {remote_output_tar_path}"
-        )
-        self.runCommand(remote_tar_cmd, stream_output=True)
+        # --- Move .rdf from nnunet_output_dir to output_dir ---
+        logger.info("Moving roi2rdf outputs from nnunet_output to output_dir...")
+        for filename in os.listdir(nnunet_output_dir):
+            if not filename.endswith('.rdf'):
+                continue
+            old_path = os.path.join(nnunet_output_dir, filename)
+            base = os.path.basename(filename)[:-4]
+            new_filename = f"{base}_m{microscope_number}.rdf"
+            os.rename(old_path, os.path.join(output_dir, new_filename))
+            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
 
-        # now the actual archive is {remote_output_tar_path}.gz
-        remote_output_tar_gz = f"{remote_output_tar_path}.gz"
-
-        # --- Download renamed archive into output_dir ---
-        logger.info(f"Downloading output archive...")
-        local_output_tar_fo = io.BytesIO()
-        self.sftp.getfo(remote_output_tar_gz, local_output_tar_fo)
-        local_output_tar_fo.seek(0)
-        with tarfile.open(fileobj=local_output_tar_fo, mode='r:gz') as tar:
-            tar.extractall(path=output_dir)
-
-        # --- Cleanup ---
-        self.runCommand(f"rm -rf {tempDir}")
+        # Cleanup
+        shutil.rmtree(tempDir)
         self.disconnect()
