@@ -2285,10 +2285,8 @@ class PyMarAiGuiApp(QMainWindow):
 
             already_analyzed = []
             for filename in selected_filenames:
-                base = os.path.splitext(filename)[0]
-                v_path = os.path.join(output_dir, base + ".v")
-                rdf_path = os.path.join(output_dir, base + ".rdf")
-                if os.path.exists(v_path) and os.path.exists(rdf_path):
+                status = self.file_status.get(os.path.join(self.selectedInputDirectory, filename))
+                if status in ("TO DO", "GOOD", "BAD"):
                     already_analyzed.append(filename)
 
             # ask user whether to include them
