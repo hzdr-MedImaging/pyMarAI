@@ -24,7 +24,7 @@ class UserCancelledError(Exception):
     pass
 
 class MarAiBase(ABC):
-    def __init__(self, cfg_path, stop_event=None):
+    def __init__(self, cfg_path, hostname=platform.node(), stop_event=None, gpu_id=None):
         # load config file
         cfg_path = cfg_path or "/usr/local/etc/pymarai.yml"
         self.cfg = self._load_config(cfg_path)
@@ -61,6 +61,15 @@ class MarAiBase(ABC):
         # Event to signal when nnUNet process itself has finished
         self.nnunet_process_finished_event = threading.Event()
 
+        # find matching host config
+        selected_host_cfg = self._find_host_config(self.cfg.get('machines', []), hostname)
+        if not selected_host_cfg:
+            raise ValueError("[ERROR] No matching remote device found in config.\n")
+
+        # extract details from config
+        self.host_cfg = selected_host_cfg
+        self.gpu_id = gpu_id
+
     # config file loader
     def _load_config(self, cfg_path):
         if not os.path.exists(cfg_path):
@@ -68,6 +77,32 @@ class MarAiBase(ABC):
             raise FileNotFoundError(f"[ERROR] Config file not found: {cfg_path}.")
         with open(cfg_path, 'r') as f:
             return yaml.safe_load(f)
+
+    # find device config by hostname or use default
+    def _find_host_config(self, machines_data, hostname=None):
+        logger.debug(f"[_find_host_config] machines_data type: {type(machines_data)}, content: {machines_data}")
+
+        if isinstance(machines_data, dict):
+            machines_list = [{k: v} for k, v in machines_data.items()]
+        elif isinstance(machines_data, list):
+            machines_list = machines_data
+        else:
+            raise ValueError(
+                f"[ERROR] Invalid format for 'machines' in config: expected dict or list, got {type(machines_data)}")
+
+        for entry in machines_list:
+            if not isinstance(entry, dict):
+                continue
+            host_key = list(entry.keys())[0]
+            cfg = entry[host_key]
+            full_cfg = {'hostname': host_key}
+            full_cfg.update(cfg)
+            if hostname and hostname == host_key:
+                return full_cfg
+            if cfg.get("default", False) and hostname is None:
+                return full_cfg
+
+        return None
 
     # build base nnunet command
     def get_nnunet_base_cmd(self, input_dir, output_dir):
@@ -92,9 +127,8 @@ class MarAiBase(ABC):
     # decide whether to add -device cpu
     def _get_device_flag(self, host_cfg):
         if host_cfg and isinstance(host_cfg, dict):
-            cpu = host_cfg.get("cpu", False)
-            gpu = host_cfg.get("gpu", True)
-            if cpu and not gpu:
+            type = host_cfg.get("type", "cpu")
+            if type == 'cpu':
                 return "-device cpu"
         return ""
 
@@ -103,8 +137,92 @@ class MarAiBase(ABC):
                    progress_pattern=None, original_input_files_map=None):
         raise NotImplementedError
 
+    # run the nnunet prediction workflow
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
-        raise NotImplementedError
+        self.progress_callback = progress_callback
+        self.total_expected_files = len(input_files)
+        self.processed_files_count = 0
+        self.reported_nnunet_files.clear()
+        self.reported_rdf_files.clear()
+        self.nnunet_process_finished_event.clear()
+
+        if self.stop_event and self.stop_event.is_set():
+            logger.info("Prediction aborted before start.")
+            return
+
+        tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
+        os.makedirs(tempDir, exist_ok=True)
+        nnunet_input_dir = os.path.join(tempDir, "nnunet_input")
+        os.makedirs(nnunet_input_dir, exist_ok=True)
+        nnunet_output_dir = os.path.join(tempDir, "nnunet_output")
+        os.makedirs(nnunet_output_dir, exist_ok=True)
+
+        original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
+
+        # create soft links in our tempDir which will point to the
+        # correct original tif files just two directories lower than tempDir
+        logger.info("Soft linking input files to temporary directory...")
+        for input_file in input_files:
+            os.symlink(os.path.join("..", "..", os.path.basename(input_file)), os.path.join(tempDir, os.path.basename(input_file)))
+
+        # --- Run mic2ecat ---
+        logger.info("Running mic2ecat...")
+        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        self.runCommand(mic2ecat_cmd, stream_output=True)
+
+        # --- Symlink mic2ecat output in nnunet_input_dir ---
+        logger.info("Soft linking mic2ecat output to nnunet_input_dir...")
+        for filename in os.listdir(tempDir):
+            old_path = os.path.join("..", filename)
+            if filename.endswith('.v'):
+                base = os.path.basename(filename)[:-2]
+                new_filename = f"{base}_0000.v"
+            else:
+                continue
+            os.symlink(old_path, os.path.join(nnunet_input_dir, new_filename))
+            logger.debug(f"Symlink {os.path.join(nnunet_input_dir, new_filename)} → {old_path}")
+
+        # --- Run nnUNet ---
+        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
+        device_flag = self._get_device_flag(self.host_cfg)
+        nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
+        nnunet_progress_pattern = r"done with (\S+)"
+        nnunet_thread = threading.Thread(target=self.runCommand,
+                                         args=(nnunet_cmd_full, True, self.nnunet_process_finished_event,
+                                               nnunet_progress_pattern, original_input_files_map))
+        logger.info(f"Executing nn-UNet: '{nnunet_cmd_full}'")
+        nnunet_thread.start()
+        nnunet_thread.join()
+
+        # --- Run roi2rdf ---
+        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
+        self.runCommand(roi2rdf_cmd, stream_output=True)
+
+        # --- Move raw _0000.v from tempDir to output_dir ---
+        logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
+        for filename in os.listdir(tempDir):
+            old_path = os.path.join(tempDir, filename)
+            if filename.endswith('.v'):
+                base = os.path.basename(filename)[:-2]
+                new_filename = f"{base}_m{microscope_number}.v"
+            else:
+                continue
+            os.rename(old_path, os.path.join(output_dir, new_filename))
+            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
+
+        # --- Move .rdf from nnunet_output_dir to output_dir ---
+        logger.info("Moving roi2rdf outputs from nnunet_output to output_dir...")
+        for filename in os.listdir(nnunet_output_dir):
+            if not filename.endswith('.rdf'):
+                continue
+            old_path = os.path.join(nnunet_output_dir, filename)
+            base = os.path.basename(filename)[:-4]
+            new_filename = f"{base}_m{microscope_number}.rdf"
+            os.rename(old_path, os.path.join(output_dir, new_filename))
+            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
+
+        # Cleanup
+        shutil.rmtree(tempDir)
 
     # returns the base filename without extension
     def get_file_prefix(self, input_file):
@@ -129,8 +247,8 @@ class MarAiBase(ABC):
         return nnunet_v_path_in_temp, rdf_path_in_temp
 
 class MarAiLocal(MarAiBase):
-    def __init__(self, cfg_path=None, stop_event=None):
-        super().__init__(cfg_path, stop_event=stop_event)
+    def __init__(self, cfg_path=None, stop_event=None, gpu_id=None):
+        super().__init__(cfg_path, hostname=platform.node(), stop_event=stop_event, gpu_id=gpu_id)
 
     # run a local shell command
     def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
@@ -174,112 +292,13 @@ class MarAiLocal(MarAiBase):
         if process_event_on_completion:
             process_event_on_completion.set()  # signal that this command has completed
 
-
-    def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
-        self.progress_callback = progress_callback
-        self.total_expected_files = len(input_files)
-        self.processed_files_count = 0
-        self.reported_nnunet_files.clear()
-        self.reported_rdf_files.clear()
-        self.nnunet_process_finished_event.clear()
-
-        if self.stop_event and self.stop_event.is_set():
-            logger.info("Local prediction aborted before start.")
-            return
-
-        tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
-        os.makedirs(tempDir, exist_ok=True)
-        nnunet_input_dir = os.path.join(tempDir, "nnunet_input")
-        os.makedirs(nnunet_input_dir, exist_ok=True)
-        nnunet_output_dir = os.path.join(tempDir, "nnunet_output")
-        os.makedirs(nnunet_output_dir, exist_ok=True)
-
-        original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
-
-        # create soft links in our tempDir which will point to the
-        # correct original tif files just two directories lower than tempDir
-        logger.info("Soft linking input files to temporary directory...")
-        for input_file in input_files:
-            os.symlink(os.path.join("..", "..", os.path.basename(input_file)), os.path.join(tempDir, os.path.basename(input_file)))
-
-        # --- Run mic2ecat ---
-        logger.info("Running mic2ecat on all files in temp dir...")
-        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
-        self.runCommand(mic2ecat_cmd, stream_output=True)
-
-        # --- Move mic2ecat .v outputs into nnunet_input ---
-        logger.info("Moving and renaming mic2ecat outputs into nnunet_input directory...")
-        move_cmd = (
-            f"cd {tempDir} && "
-            f"for file in *.v; do "
-            f"  prefix=$(basename \"$file\" .v); "
-            f"  mv -- \"$file\" \"{nnunet_input_dir}/${{prefix}}_0000.v\"; "
-            f"done"
-        )
-        self.runCommand(move_cmd, stream_output=True)
-
-        # --- Run nnUNet ---
-        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir) + " -device cpu"
-        nnunet_progress_pattern = r"done with (\S+)"
-        nnunet_thread = threading.Thread(target=self.runCommand,
-                                         args=(nnunet_cmd, True, self.nnunet_process_finished_event,
-                                               nnunet_progress_pattern, original_input_files_map))
-        nnunet_thread.start()
-        nnunet_thread.join()
-
-        # --- Run roi2rdf ---
-        logger.info("Running roi2rdf on all files in nnunet output dir...")
-        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
-        self.runCommand(roi2rdf_cmd, stream_output=True)
-
-        # --- Rename raw .v in nnunet_input ---
-        logger.info("Renaming raw mic2ecat outputs in nnunet_input...")
-        for filename in os.listdir(nnunet_input_dir):
-            old_path = os.path.join(nnunet_input_dir, filename)
-            if filename.endswith('_0000.v'):
-                base = filename.replace('_0000.v', '')
-                new_filename = f"{base}_m{microscope_number}.v"
-            elif filename.endswith('.v'):
-                base = filename[:-2]
-                new_filename = f"{base}_m{microscope_number}.v"
-            else:
-                continue
-            os.rename(old_path, os.path.join(nnunet_input_dir, new_filename))
-            logger.debug(f"Renamed {old_path} → {new_filename}")
-
-        # --- Rename .rdf in nnunet_output ---
-        logger.info("Renaming roi2rdf outputs in nnunet_output...")
-        for filename in os.listdir(nnunet_output_dir):
-            if not filename.endswith('.rdf'):
-                continue
-            old_path = os.path.join(nnunet_output_dir, filename)
-            base = filename[:-4]
-            new_filename = f"{base}_m{microscope_number}.rdf"
-            os.rename(old_path, os.path.join(nnunet_output_dir, new_filename))
-            logger.debug(f"Renamed {old_path} → {new_filename}")
-
-        # --- Copy renamed raw .v + rdf outputs to final output_dir ---
-        logger.info("Copying renamed raw .v + rdf outputs to final destination...")
-        copy_raw_cmd = f"cd {nnunet_input_dir} && cp -n *.v {shlex.quote(output_dir)} 2>/dev/null || true"
-        copy_rdf_cmd = f"cd {nnunet_output_dir} && cp -n *.rdf {shlex.quote(output_dir)} 2>/dev/null || true"
-        self.runCommand(copy_raw_cmd, stream_output=True)
-        self.runCommand(copy_rdf_cmd, stream_output=True)
-
 class MarAiRemote(MarAiBase):
     def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None, gpu_id=None):
-        super().__init__(cfg_path, stop_event=stop_event)
+        super().__init__(cfg_path, hostname=hostname, stop_event=stop_event, gpu_id=gpu_id)
 
-        # find matching host config
-        selected_host_cfg = self._find_host_config(self.cfg.get('machines', []), hostname)
-        if not selected_host_cfg:
-            raise ValueError("[ERROR] No matching remote device found in config.\n")
-
-        # extract details from config
-        self.host_cfg = selected_host_cfg
-        self.gpu_id = gpu_id
-        self.hostname = selected_host_cfg.get('hostname')
-        self.ipaddress = selected_host_cfg.get('ip')
-
+        # get remote host details from host config
+        self.hostname = self.host_cfg.get('hostname')
+        self.ipaddress = self.host_cfg.get('ip')
         self.username = username
         self.password = password
 
@@ -294,32 +313,6 @@ class MarAiRemote(MarAiBase):
     def __del__(self):
         if hasattr(self, "connected") and self.connected:
             self.disconnect()
-
-    # find device config by hostname or use default
-    def _find_host_config(self, machines_data, hostname=None):
-        logger.debug(f"[_find_host_config] machines_data type: {type(machines_data)}, content: {machines_data}")
-
-        if isinstance(machines_data, dict):
-            machines_list = [{k: v} for k, v in machines_data.items()]
-        elif isinstance(machines_data, list):
-            machines_list = machines_data
-        else:
-            raise ValueError(
-                f"[ERROR] Invalid format for 'machines' in config: expected dict or list, got {type(machines_data)}")
-
-        for entry in machines_list:
-            if not isinstance(entry, dict):
-                continue
-            host_key = list(entry.keys())[0]
-            cfg = entry[host_key]
-            full_cfg = {'hostname': host_key}
-            full_cfg.update(cfg)
-            if hostname and hostname == host_key:
-                return full_cfg
-            if cfg.get("default", False) and hostname is None:
-                return full_cfg
-
-        return None
 
     def connect(self):
         if not self.connected:
@@ -411,87 +404,6 @@ class MarAiRemote(MarAiBase):
             process_event_on_completion.set()
 
     def predictCall(self, input_files, microscope_number, output_dir, progress_callback=None):
-        self.progress_callback = progress_callback
-        self.total_expected_files = len(input_files)
-        self.processed_files_count = 0
-        self.reported_nnunet_files.clear()
-        self.reported_rdf_files.clear()
-        self.nnunet_process_finished_event.clear()
-
-        if self.stop_event and self.stop_event.is_set():
-            logger.info("Remote prediction aborted before start.")
-            return
-
-        tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
-        os.makedirs(tempDir, exist_ok=True)
-        nnunet_input_dir = os.path.join(tempDir, "nnunet_input")
-        os.makedirs(nnunet_input_dir, exist_ok=True)
-        nnunet_output_dir = os.path.join(tempDir, "nnunet_output")
-        os.makedirs(nnunet_output_dir, exist_ok=True)
-
-        original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
-
-        # create soft links in our tempDir which will point to the
-        # correct original tif files just two directories lower than tempDir
-        logger.info("Soft linking input files to temporary directory...")
-        for input_file in input_files:
-            os.symlink(os.path.join("..", "..", os.path.basename(input_file)), os.path.join(tempDir, os.path.basename(input_file)))
-
-        # --- Run mic2ecat ---
-        logger.info("Running mic2ecat...")
-        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
-        self.runCommand(mic2ecat_cmd, stream_output=True)
-
-        # --- Symlink mic2ecat output in nnunet_input_dir ---
-        logger.info("Soft linking mic2ecat output to nnunet_input_dir...")
-        for filename in os.listdir(tempDir):
-            old_path = os.path.join("..", filename)
-            if filename.endswith('.v'):
-                base = os.path.basename(filename)[:-2]
-                new_filename = f"{base}_0000.v"
-            else:
-                continue
-            os.symlink(old_path, os.path.join(nnunet_input_dir, new_filename))
-            logger.debug(f"Symlink {os.path.join(nnunet_input_dir, new_filename)} → {old_path}")
-
-        # --- Run nnUNet ---
-        nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
-        device_flag = self._get_device_flag(self.host_cfg)
-        nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
-        nnunet_progress_pattern = r"done with (\S+)"
-        nnunet_thread = threading.Thread(target=self.runCommand,
-                                         args=(nnunet_cmd_full, True, self.nnunet_process_finished_event,
-                                               nnunet_progress_pattern, original_input_files_map))
-        nnunet_thread.start()
-        nnunet_thread.join()
-
-        # --- Run roi2rdf ---
-        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
-        self.runCommand(roi2rdf_cmd, stream_output=True)
-
-        # --- Move raw _0000.v from tempDir to output_dir ---
-        logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
-        for filename in os.listdir(tempDir):
-            old_path = os.path.join(tempDir, filename)
-            if filename.endswith('.v'):
-                base = os.path.basename(filename)[:-2]
-                new_filename = f"{base}_m{microscope_number}.v"
-            else:
-                continue
-            os.rename(old_path, os.path.join(output_dir, new_filename))
-            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
-
-        # --- Move .rdf from nnunet_output_dir to output_dir ---
-        logger.info("Moving roi2rdf outputs from nnunet_output to output_dir...")
-        for filename in os.listdir(nnunet_output_dir):
-            if not filename.endswith('.rdf'):
-                continue
-            old_path = os.path.join(nnunet_output_dir, filename)
-            base = os.path.basename(filename)[:-4]
-            new_filename = f"{base}_m{microscope_number}.rdf"
-            os.rename(old_path, os.path.join(output_dir, new_filename))
-            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
-
-        # Cleanup
-        shutil.rmtree(tempDir)
+        self.connect()
+        super().predictCall(input_files, microscope_number, output_dir, progress_callback)
         self.disconnect()

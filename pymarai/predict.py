@@ -53,10 +53,13 @@ class PredictionTask:
 
     def _get_predictor(self):
         if self.use_local:
-            self.log_fn("Using local predictor.")
-            return MarAiLocal(stop_event=self.stop_event)
+            self.log_fn(f"Using LOCAL predictor on host: {platform.node()}")
+            return MarAiLocal(
+                stop_event=self.stop_event,
+                gpu_id=self.gpu_id
+            )
         else:
-            self.log_fn(f"Using remote predictor on host: {self.hostname}.")
+            self.log_fn(f"Using REMOTE predictor on host: {self.hostname}.")
             return MarAiRemote(
                 hostname=self.hostname,
                 username=self.ssh_username,
