@@ -5,11 +5,9 @@ import platform
 import yaml
 import paramiko
 import threading
-import time
 import logging
 import shlex
 import re
-import io
 
 from abc import ABC
 
