@@ -392,6 +392,10 @@ class MarAiRemote(MarAiBase):
     # run command remotely and stream output (now can signal completion)
     def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
                    progress_pattern=None, original_input_files_map=None):
+
+        # make sure we are connected
+        self.connect()
+
         if not self.connected:
             raise RuntimeError("[ERROR] Not connected to remote host.")
 
@@ -475,15 +479,17 @@ class MarAiRemote(MarAiBase):
             logger.info("Remote prediction aborted before start.")
             return
 
-        self.connect()
         tempDir = os.path.join(output_dir, f"tmp-{os.getpid()}-{threading.get_ident()}")
+        os.makedirs(tempDir, exist_ok=True)
         nnunet_input = os.path.join(tempDir, "nnunet_input")
+        os.makedirs(nnunet_input, exist_ok=True)
         nnunet_output = os.path.join(tempDir, "nnunet_output")
-        self.runCommand(["mkdir", "-p", tempDir, nnunet_input, nnunet_output])
+        os.makedirs(nnunet_output, exist_ok=True)
 
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
         # --- In-memory packaging of input files ---
+        self.connect()
         logger.info(f"Packaging {len(input_files)} files for in-memory upload...")
         local_input_tar_fo = io.BytesIO()
         try:
