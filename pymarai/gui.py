@@ -3,6 +3,9 @@ import os
 import subprocess
 import multiprocessing
 import logging
+
+from pymarai import login
+
 import pymarai.login
 import pymarai.predict
 import traceback
@@ -11,7 +14,6 @@ import pmedio
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-#import xlsxwriter
 import cv2
 import csv
 import re
@@ -1289,79 +1291,42 @@ class PyMarAiGuiApp(QMainWindow):
 
         base_name = os.path.splitext(os.path.basename(full_input_path))[0]
 
-        # find matching .v file in the output directory
-        if not os.path.isdir(self.hiddenOutputDir):
-            os.makedirs(self.hiddenOutputDir, exist_ok=True)
-
-        pattern = re.compile(rf"^{re.escape(base_name)}(_m\d+)?(_(GOOD|BAD|TO DO))?\.v$", re.IGNORECASE)
-        matching_files = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
-
-        if not matching_files:
-            raise FileNotFoundError(f"No matching .v file found for {base_name} in {self.hiddenOutputDir}")
-
-        # sort files by modification time to get the latest one
-        matching_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
-
-        matched_v_file = matching_files[0]
-        v_file_path_in_output = os.path.join(self.hiddenOutputDir, matched_v_file)
-        matched_base =  os.path.splitext(matched_v_file)[0]
-
-        generated_mask_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn.v")
-
-        # load the original image
+        # Load the original image first
         original_image_pil = Image.open(full_input_path)
         original_image_pil = ImageOps.exif_transpose(original_image_pil)
         if original_image_pil.mode != "RGB":
             original_image_pil = original_image_pil.convert("RGB")
 
-        # prepare cache directory
-        try:
-            v_file_mtime = os.path.getmtime(v_file_path_in_output)
-            v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
-        except Exception as e:
-            signals.errorOccurred.emit(f"[ERROR] Failed to get timestamp for {v_file_path_in_output}: {e}\n")
-            raise
+        # Check for the hidden output directory
+        if not os.path.isdir(self.hiddenOutputDir):
+            signals.progress_message.emit(f"[ERROR] Output directory not found: {self.hiddenOutputDir}\n")
+            return self._load_and_convert_image(full_input_path)
 
-        cache_dir = os.path.join(self.hiddenOutputDir, "cnn_masks_prediction")
-        os.makedirs(cache_dir, exist_ok=True)
-        cached_mask_name = f"{matched_base}_{v_file_timestamp}_cnn.v"
-        cached_mask_path = os.path.join(cache_dir, cached_mask_name)
+        # find all relevant files for the current base_name
+        all_matching_files = [f for f in os.listdir(self.hiddenOutputDir) if f.startswith(base_name)]
 
-        # check cache or generate mask
-        if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
-            signals.progress_message.emit(f"[INFO] Using cached mask for {matched_v_file}\n")
-            mask_file_to_use = cached_mask_path
-        else:
-            signals.progress_message.emit(f"Running thrass for {matched_v_file} mask generation...\n")
-            thrass_command = ["thrass", "-t", "cnnPrepare", "-b", matched_v_file]
-            env = os.environ.copy()
-            result = subprocess.run(thrass_command, capture_output=True, text=True, cwd=self.hiddenOutputDir, env=env)
+        # find the primary .v file
+        v_files = [f for f in all_matching_files if f.endswith('.v') and '_cnn' not in f]
+        v_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
 
-            signals.progress_message.emit(f"Thrass stdout:\n{result.stdout}\n")
-            if result.stderr:
-                signals.progress_message.emit(f"Thrass stderr:\n{result.stderr}\n")
-            if result.returncode != 0:
-                raise RuntimeError(f"Thrass failed with exit code {result.returncode}")
+        if not v_files:
+            signals.progress_message.emit(
+                f"[WARNING] No matching .v file found for {base_name}. Skipping mask overlay.\n")
+            return self._load_and_convert_image(full_input_path)
 
-            # wait for generated mask
-            wait_time = 0
-            while not os.path.exists(generated_mask_path) and wait_time < 5:
-                time.sleep(0.5)
-                wait_time += 0.5
-            if not os.path.exists(generated_mask_path):
-                raise FileNotFoundError(f"Mask file not found: {generated_mask_path}")
+        matched_v_file = v_files[0]
+        matched_base = os.path.splitext(matched_v_file)[0]
 
-            shutil.copy2(generated_mask_path, cached_mask_path)
-            mask_file_to_use = cached_mask_path
+        # now, find the corresponding _cnn.v file
+        mask_file_to_use = os.path.join(self.hiddenOutputDir, f"{matched_base}_cnn.v")
 
-            # clean up Thrass output files
-            for fname in os.listdir(self.hiddenOutputDir):
-                if fname.startswith(matched_base + "_cnn_") and fname.endswith(".v"):
-                    try:
-                        os.remove(os.path.join(self.hiddenOutputDir, fname))
-                        signals.progress_message.emit(f"[INFO] Deleted Thrass output file: {fname}\n")
-                    except Exception as e:
-                        signals.progress_message.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
+        if not os.path.exists(mask_file_to_use):
+            signals.progress_message.emit(
+                f"[WARNING] Corresponding CNN mask file not found: {mask_file_to_use}. Displaying original image.\n")
+            combined_image_pil = original_image_pil.convert('RGBA')
+            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"), combined_image_pil.width,
+                          combined_image_pil.height, QImage.Format_RGBA8888)
+            return QPixmap.fromImage(qimg)
 
         # load mask data
         mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
@@ -1806,33 +1771,33 @@ class PyMarAiGuiApp(QMainWindow):
             QMessageBox.warning(self, "Open in ROVER", "Please select a valid output directory.")
             return
 
-        v_files_to_open = []
+        files_to_open = []
         output_files = os.listdir(output_dir)
 
         for filename in selected_filenames:
             base, _ = os.path.splitext(os.path.basename(filename))
 
-            matching_v_files = [
+            matching_files = [
                 os.path.join(output_dir, f)
                 for f in output_files
-                if base in f and f.endswith('.v')
+                if base in f and f.endswith('.v') and '_cnn' not in f
             ]
 
-            if not matching_v_files:
-                self.update_progress_text_signal.emit(f"[ERROR] No .v file found for '{filename}'. Skipping.\n")
+            if not matching_files:
+                self.update_progress_text_signal.emit(f"[ERROR] No .v or .rdf file found for '{filename}'. Skipping.\n")
             else:
-                v_files_to_open.extend(matching_v_files)
+                files_to_open.extend(matching_files)
 
-        if not v_files_to_open:
-            self.update_progress_text_signal.emit("[ERROR] No valid .v files found to open in ROVER.\n")
+        if not files_to_open:
+            self.update_progress_text_signal.emit("[ERROR] No valid .v or .rdf files found to open in ROVER.\n")
             QMessageBox.warning(self, "Open in ROVER", "No valid files were found to open.")
             return
 
-        command = ["rover", "-R", "1"] + v_files_to_open
+        command = ["rover", "-R", "1"] + files_to_open
 
         self.update_progress_text_signal.emit(
-            f"Opening {len(v_files_to_open)} file(s) in ROVER:\n"
-            + "\n".join(v_files_to_open) + "\n"
+            f"Opening {len(files_to_open)} file(s) in ROVER:\n"
+            + "\n".join(files_to_open) + "\n"
         )
 
         try:
@@ -1882,10 +1847,11 @@ class PyMarAiGuiApp(QMainWindow):
         for file_info in analyzed_files_info:
             base_filename = file_info['base_filename']
 
-            # find all matching files for the current base_filename
+            # find all matching files for the current base_filename,
+            # ignoring any files containing '_cnn' in their name
             matching_output_files = [
                 f for f in all_output_files
-                if f.startswith(base_filename) and (f.endswith('.v') or f.endswith('.rdf'))
+                if f.startswith(base_filename) and (f.endswith('.v') or f.endswith('.rdf')) and '_cnn' not in f
             ]
 
             if not matching_output_files:
@@ -1918,7 +1884,7 @@ class PyMarAiGuiApp(QMainWindow):
             final_message.extend([f"• {f}" for f in files_failed_to_copy])
 
         if final_message:
-            QMessageBox.information(self, "Copying complete", "\\n\\n".join(final_message))
+            QMessageBox.information(self, "Copying complete", "\n\n".join(final_message))
 
     # generates a statistics table using the 'thrass' command for all selected files that have a 'GOOD' status
     def generateStatisticsTable(self):
@@ -1953,10 +1919,9 @@ class PyMarAiGuiApp(QMainWindow):
         for full_path in good_files:
             base_filename = os.path.splitext(os.path.basename(full_path))[0]
 
-            # find the corresponding .v file in the hidden directory by matching the base filename
             matching_v_file = None
             for f in output_files:
-                if f.startswith(base_filename) and f.endswith('.v'):
+                if f.startswith(base_filename) and f.endswith('.v') and '_cnn' not in f:
                     matching_v_file = f
                     break
 
@@ -2472,6 +2437,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.progressBarLabel.hide()
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
+        self.applyPredictionMask()
         self.switchElementsToPrediction(False)
 
     def retrainButtonPressed(self):
@@ -2738,7 +2704,6 @@ class MaskBatchWorker(QThread):
         self.app = app_instance
         self.filenames = filenames
         self.input_dir = input_dir
-        # output_dir is no longer needed as an argument.
         self.mask_settings = mask_settings
         self.tab_type = tab_type
         self._abort = False
