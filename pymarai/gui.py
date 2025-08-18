@@ -11,7 +11,7 @@ import pmedio
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-import xlsxwriter
+#import xlsxwriter
 import cv2
 import csv
 import re
@@ -2008,9 +2008,9 @@ class PyMarAiGuiApp(QDialog):
         save_csv_button.clicked.connect(lambda: self.saveTableAsCsv(header, data))
         button_layout.addWidget(save_csv_button)
 
-        save_excel_button = QPushButton("Save as Excel", dialog)
+        """save_excel_button = QPushButton("Save as Excel", dialog)
         save_excel_button.clicked.connect(lambda: self.saveTableAsExcel(header, data))
-        button_layout.addWidget(save_excel_button)
+        button_layout.addWidget(save_excel_button)"""
 
         close_button = QPushButton("Close", dialog)
         close_button.clicked.connect(dialog.close)
@@ -2033,7 +2033,7 @@ class PyMarAiGuiApp(QDialog):
                 QMessageBox.critical(self, "Error", f"An error occurred while saving the file: {e}")
 
     # saves the statistics table data to an Excel file selected by the user
-    def saveTableAsExcel(self, header, data):
+    """def saveTableAsExcel(self, header, data):
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Statistics Table", "", "Excel Files (*.xlsx)")
         if file_path:
             try:
@@ -2048,7 +2048,7 @@ class PyMarAiGuiApp(QDialog):
                 workbook.close()
                 QMessageBox.information(self, "Success", f"Statistics table saved to:\n{file_path}")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"An error occurred while saving the Excel file:\n{e}")
+                QMessageBox.critical(self, "Error", f"An error occurred while saving the Excel file:\n{e}")"""
 
     def onTabChanged(self, index):
         if index == 0:
