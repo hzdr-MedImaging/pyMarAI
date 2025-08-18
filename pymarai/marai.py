@@ -227,7 +227,7 @@ class MarAiLocal(MarAiBase):
         self.nnunet_process_finished_event.clear()
 
         if self.stop_event and self.stop_event.is_set():
-            logger.info("[INFO] Local prediction aborted before start.")
+            logger.info("Local prediction aborted before start.")
             return
 
         nnunet_input_dir = os.path.join(self.localTempDir.name, "nnunet_input")
@@ -238,18 +238,17 @@ class MarAiLocal(MarAiBase):
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
         # --- Copy input files to temp dir ---
-        logger.info("[INFO] Copying input files to temporary directory...")
+        logger.info("Copying input files to temporary directory...")
         for input_file in input_files:
             shutil.copy(input_file, os.path.join(self.localTempDir.name, os.path.basename(input_file)))
 
-        # --- Run mic2ecat  ---
-        logger.info("[INFO] Running mic2ecat on all files in temp dir...")
+        # --- Run mic2ecat ---
+        logger.info("Running mic2ecat on all files in temp dir...")
         mic2ecat_cmd = f"cd {self.localTempDir.name} && {self.mic2ecat_path} -j {microscope_number} *.tif"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
         # --- Move mic2ecat .v outputs into nnunet_input ---
-        logger.info("[INFO] Moving and renaming mic2ecat outputs into nnunet_input directory...")
-
+        logger.info("Moving and renaming mic2ecat outputs into nnunet_input directory...")
         move_cmd = (
             f"cd {self.localTempDir.name} && "
             f"for file in *.v; do "
@@ -269,34 +268,42 @@ class MarAiLocal(MarAiBase):
         nnunet_thread.join()
 
         # --- Run roi2rdf ---
-        logger.info("[INFO] Running roi2rdf on all files in nnunet output dir...")
+        logger.info("Running roi2rdf on all files in nnunet output dir...")
         roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
         self.runCommand(roi2rdf_cmd, stream_output=True)
 
-        # --- Copy outputs to final output_dir ---
-        logger.info("[INFO] Copying all .v and .rdf outputs to final destination...")
+        # --- Rename raw .v in nnunet_input ---
+        logger.info("Renaming raw mic2ecat outputs in nnunet_input...")
+        for filename in os.listdir(nnunet_input_dir):
+            old_path = os.path.join(nnunet_input_dir, filename)
+            if filename.endswith('_0000.v'):
+                base = filename.replace('_0000.v', '')
+                new_filename = f"{base}_m{microscope_number}.v"
+            elif filename.endswith('.v'):
+                base = filename[:-2]
+                new_filename = f"{base}_m{microscope_number}.v"
+            else:
+                continue
+            os.rename(old_path, os.path.join(nnunet_input_dir, new_filename))
+            logger.debug(f"Renamed {old_path} → {new_filename}")
 
-        copy_outputs_cmd = (
-            f"cd {self.localTempDir.name} && "
-            f"cp -- *.v {shlex.quote(output_dir)} && "
-            f"cd {nnunet_output_dir} && "
-            f"cp -- *.v {shlex.quote(output_dir)} && "
-            f"cp -- *.rdf {shlex.quote(output_dir)}"
-        )
-        self.runCommand(copy_outputs_cmd, stream_output=True)
+        # --- Rename .rdf in nnunet_output ---
+        logger.info("Renaming roi2rdf outputs in nnunet_output...")
+        for filename in os.listdir(nnunet_output_dir):
+            if not filename.endswith('.rdf'):
+                continue
+            old_path = os.path.join(nnunet_output_dir, filename)
+            base = filename[:-4]
+            new_filename = f"{base}_m{microscope_number}.rdf"
+            os.rename(old_path, os.path.join(nnunet_output_dir, new_filename))
+            logger.debug(f"Renamed {old_path} → {new_filename}")
 
-        # --- Rename the output files ---
-        logger.info("[INFO] Renaming nnUNet output files...")
-        try:
-            for filename in os.listdir(output_dir):
-                if filename.endswith('_0000.v'):
-                    new_filename = filename.replace('_0000.v', '.v')
-                    old_path = os.path.join(output_dir, filename)
-                    new_path = os.path.join(output_dir, new_filename)
-                    os.rename(old_path, new_path)
-                    logger.debug(f"Renamed {old_path} to {new_path}")
-        except Exception as e:
-            logger.error(f"[ERROR] Error renaming files: {e}")
+        # --- Copy renamed raw .v + rdf outputs to final output_dir ---
+        logger.info("Copying renamed raw .v + rdf outputs to final destination...")
+        copy_raw_cmd = f"cd {nnunet_input_dir} && cp -n *.v {shlex.quote(output_dir)} 2>/dev/null || true"
+        copy_rdf_cmd = f"cd {nnunet_output_dir} && cp -n *.rdf {shlex.quote(output_dir)} 2>/dev/null || true"
+        self.runCommand(copy_raw_cmd, stream_output=True)
+        self.runCommand(copy_rdf_cmd, stream_output=True)
 
 class MarAiRemote(MarAiBase):
     def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None, gpu_id=None):
@@ -359,14 +366,14 @@ class MarAiRemote(MarAiBase):
 
     def connect(self):
         if not self.connected:
-            logger.info(f"[INFO] Connecting to remote host {self.hostname}...")
+            logger.info(f"Connecting to remote host {self.hostname}...")
             try:
                 if len(self.ssh_keys) > 0:
                     self.ssh.connect(self.hostname, port=22, username=self.username, key_filename=self.ssh_keys[0])
-                    logger.info(f"[INFO] Connection successful via key-based authentication ({self.ssh_keys[0]}).")
+                    logger.info(f"Connection successful via key-based authentication ({self.ssh_keys[0]}).")
                 else:
                     self.ssh.connect(self.hostname, port=22, username=self.username, password=self.password)
-                    logger.info(f"[INFO] Connection successful via password authentication")
+                    logger.info(f"Connection successful via password authentication")
 
                 self.sftp = self.ssh.open_sftp()
                 self.connected = True
@@ -475,7 +482,7 @@ class MarAiRemote(MarAiBase):
         self.nnunet_process_finished_event.clear()
 
         if self.stop_event and self.stop_event.is_set():
-            logger.info("[INFO] Remote prediction aborted before start.")
+            logger.info("Remote prediction aborted before start.")
             return
 
         self.connect()
@@ -487,7 +494,7 @@ class MarAiRemote(MarAiBase):
         original_input_files_map = {self.get_file_prefix(f): f for f in input_files}
 
         # --- In-memory packaging of input files ---
-        logger.info(f"[INFO] Packaging {len(input_files)} files for in-memory upload...")
+        logger.info(f"Packaging {len(input_files)} files for in-memory upload...")
         local_input_tar_fo = io.BytesIO()
         try:
             with tarfile.open(fileobj=local_input_tar_fo, mode='w:gz') as tar:
@@ -499,25 +506,21 @@ class MarAiRemote(MarAiBase):
             self.disconnect()
             raise
 
-        # --- Upload the in-memory archive ---
+        # --- Upload archive ---
         local_input_tar_fo.seek(0)
         remote_input_tar_path = f"{remote_temp}/input_{self.tempId}.tar.gz"
-        logger.info(f"[INFO] Uploading input archive to {remote_temp}...")
+        logger.info(f"Uploading input archive to {remote_temp}...")
         self.sftp.putfo(local_input_tar_fo, remote_input_tar_path)
-        logger.info("[INFO] Input archive uploaded.")
 
-        # --- Remote unpacking of input files ---
-        logger.info(f"[INFO] Extracting input files on remote host...")
+        # --- Extract on remote ---
+        logger.info(f"Extracting input files on remote host...")
         self.runCommand(f"tar -xzf {remote_input_tar_path} -C {remote_temp}")
 
-        # --- Run mic2ecat in batch remotely ---
-        logger.info("[INFO] Running mic2ecat remotely on all files in temp dir...")
+        # --- Run mic2ecat ---
         mic2ecat_cmd = f"cd {remote_temp} && {self.mic2ecat_path} -j {microscope_number} *.tif"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
-        # --- Copy .v outputs into nnunet_input dir remotely ---
-        logger.info("[INFO] Moving and renaming mic2ecat outputs into nnunet_input directory...")
-
+        # --- Move mic2ecat outputs into nnunet_input ---
         remote_copy_cmd = (
             f"cd {remote_temp} && "
             f"for file in *.v; do "
@@ -527,7 +530,7 @@ class MarAiRemote(MarAiBase):
         )
         self.runCommand(remote_copy_cmd, stream_output=True)
 
-        # --- Run nnUNet remotely ---
+        # --- Run nnUNet ---
         nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input, nnunet_output)
         device_flag = self._get_device_flag(self.host_cfg)
         nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
@@ -538,52 +541,50 @@ class MarAiRemote(MarAiBase):
         nnunet_thread.start()
         nnunet_thread.join()
 
-        # --- Run roi2rdf in batch remotely ---
-        logger.info("[INFO] Running roi2rdf remotely on all files in nnunet output dir...")
+        # --- Run roi2rdf ---
         roi2rdf_cmd = f"cd {nnunet_output} && {self.roi2rdf_path} *.v"
         self.runCommand(roi2rdf_cmd, stream_output=True)
 
-        # --- Remote packaging of output files ---
-        logger.info("[INFO] Packaging output files for download...")
-
-        remote_output_tar_path = f"{remote_temp}/output_{self.tempId}.tar.gz"
-
-        remote_tar_cmd = (
-            f"cd {remote_temp} && "
-            f"tar -czf {remote_output_tar_path} "
-            f"-C {nnunet_input} . "
-            f"-C {nnunet_output} . "
+        # --- Rename raw .v in nnunet_input and rdf in nnunet_output ---
+        logger.info("Renaming raw .v + rdf on remote host...")
+        remote_rename_cmd = (
+            f"cd {nnunet_input} && "
+            f"for f in *.v; do "
+            f"  case $f in "
+            f"    *_0000.v) base=${{f%%_0000.v}}; mv \"$f\" \"${{base}}_m{microscope_number}.v\" ;; "
+            f"    *.v) base=${{f%%.v}}; mv \"$f\" \"${{base}}_m{microscope_number}.v\" ;; "
+            f"  esac; "
+            f"done; "
+            f"cd {nnunet_output} && "
+            f"for f in *.rdf; do "
+            f"  base=${{f%%.rdf}}; mv \"$f\" \"${{base}}_m{microscope_number}.rdf\"; "
+            f"done"
         )
+        self.runCommand(remote_rename_cmd, stream_output=True)
 
+        # --- Package renamed raw .v + rdf outputs only ---
+        remote_output_tar_path = f"{remote_temp}/output_{self.tempId}.tar"
+        remote_tar_cmd = (
+            f"cd {nnunet_input} && tar -cf {remote_output_tar_path} . && "
+            f"cd {nnunet_output} && "
+            f"rdf_files=$(ls *.rdf 2>/dev/null || true); "
+            f"if [ -n \"$rdf_files\" ]; then "
+            f"tar --append -f {remote_output_tar_path} $rdf_files; "
+            f"fi && "
+            f"gzip -f {remote_output_tar_path}"
+        )
         self.runCommand(remote_tar_cmd, stream_output=True)
 
-        if self.progress_callback:
-            self.progress_callback(self.total_expected_files, self.total_expected_files, "Output files",
-                                   "Packaging results")
+        # now the actual archive is {remote_output_tar_path}.gz
+        remote_output_tar_gz = f"{remote_output_tar_path}.gz"
 
-        # --- Download the output archive into memory ---
-        logger.info(f"[INFO] Downloading output archive...")
+        # --- Download renamed archive into output_dir ---
+        logger.info(f"Downloading output archive...")
         local_output_tar_fo = io.BytesIO()
-        self.sftp.getfo(remote_output_tar_path, local_output_tar_fo)
-        logger.info("[INFO] Output archive downloaded.")
-
-        # --- Unpack the in-memory output archive ---
-        logger.info(f"[INFO] Unpacking output archive to {output_dir}...")
+        self.sftp.getfo(remote_output_tar_gz, local_output_tar_fo)
         local_output_tar_fo.seek(0)
         with tarfile.open(fileobj=local_output_tar_fo, mode='r:gz') as tar:
             tar.extractall(path=output_dir)
-
-        # --- Rename the output files ---
-        logger.info("[INFO] Renaming nnUNet output files...")
-        try:
-            for filename in os.listdir(output_dir):
-                if filename.endswith('_0000.v'):
-                    new_filename = filename.replace('_0000.v', '.v')
-                    old_path = os.path.join(output_dir, filename)
-                    new_path = os.path.join(output_dir, new_filename)
-                    os.rename(old_path, new_path)
-        except Exception as e:
-            logger.error(f"[ERROR] Error renaming files: {e}")
 
         # --- Cleanup ---
         self.runCommand(f"rm -rf {remote_temp}")
