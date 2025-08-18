@@ -24,17 +24,18 @@ from pymarai.config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QTableWidgetItem,
                              QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
-                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip, QSplitter)
+                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip, QSplitter,
+                             QMainWindow)
 
 from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
-from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool
+from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
 from PIL import Image, ImageOps
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Main GUI application class for Spheroids-DNN
-class PyMarAiGuiApp(QDialog):
+class PyMarAiGuiApp(QMainWindow):
 
     # signals to update GUI from worker threads/processes
     update_progress_text_signal = pyqtSignal(str)
@@ -51,7 +52,7 @@ class PyMarAiGuiApp(QDialog):
         self.microscopes = config.get_microscopes()
         self.defaultMicroscopeType = config.get_default_microscope()
 
-        self.settings = QSettings("PyMarAi", "PyMarAiGuiApp")
+        self.settings = QSettings()
         self.selectedInputDirectory = self.settings.value("lastInputDir", os.getcwd())
         self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", os.getcwd())
         self.lastRetrainOutputDirectory = self.settings.value("lastRetrainOutputDir", os.getcwd())
@@ -95,26 +96,40 @@ class PyMarAiGuiApp(QDialog):
         self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        self.tab_widget.addTab(self.retrain_tab, "Re-training")
+        #self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.tab_widget.currentChanged.connect(self.onTabChanged)
 
         self.setupPredictionTab()
         self.setupRetrainTab()
 
-        # main layout
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(self.tab_widget)
-
         self.setWindowTitle(f"pyMarAI v{__version__} – Spheroids Auto Delineation (hzdr.de)")
-
         self.initElements()
+        self.setCentralWidget(self.tab_widget)
+
+        # Initial window size/pos last saved.
+        self.restoreGeometry(self.settings.value("geometry", QByteArray()))
+        self.restoreState(self.settings.value("windowState", QByteArray()))
+        self.predictionTopSplitterWidget.restoreState(self.settings.value("predictionTopSplitterWidget", QByteArray()))
+        self.predictionBottomSplitterWidget.restoreState(self.settings.value("predictionBottomSplitterWidget", QByteArray()))
+        self.imagePreviewLabel.setZoom(int(self.settings.value("imagePreviewLabelZoom", 1)))
+
+    # close event to perform certain things while the main gui is being closed
+    def closeEvent(self, e):
+        # Write window size and position to QSettings
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("windowState", self.saveState())
+        self.settings.setValue("predictionTopSplitterWidget", self.predictionTopSplitterWidget.saveState())
+        self.settings.setValue("predictionBottomSplitterWidget", self.predictionBottomSplitterWidget.saveState())
+        self.settings.setValue("imagePreviewLabelZoom", self.imagePreviewLabel.getZoom())
+        super().closeEvent(e)
+        e.accept()
 
     # sets up the layout and widgets for the prediction tab
     def setupPredictionTab(self):
         # --- Input File Section ---
         inputFileLabel = self.createLabel("Input folder:")
-        self.inputDirButton = self.createButton("Browse", self.loadInputDirectory)
+        self.inputDirButton = self.createButton("Change Folder", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
 
@@ -286,9 +301,9 @@ class PyMarAiGuiApp(QDialog):
         predictionLogLayout.addWidget(self.progressPlainTextEdit)
 
         # Create horizontal splitter to divide top area
-        topSplitterWidget = QSplitter(Qt.Orientation.Horizontal)
-        topSplitterWidget.addWidget(inputFileSectionWidget)
-        topSplitterWidget.addWidget(imagePreviewContainerWidget)
+        self.predictionTopSplitterWidget = QSplitter(Qt.Orientation.Horizontal)
+        self.predictionTopSplitterWidget.addWidget(inputFileSectionWidget)
+        self.predictionTopSplitterWidget.addWidget(imagePreviewContainerWidget)
 
         # Create bottom layout part
         predictionControlWidget = QWidget()
@@ -299,20 +314,20 @@ class PyMarAiGuiApp(QDialog):
         predictionControlLayout.addWidget(predictionLogWidget)
 
         # Create horizontal splitter to divide top area
-        bottomSplitterWidget = QSplitter(Qt.Orientation.Vertical)
-        bottomSplitterWidget.setStyleSheet('QSplitter::handle {border: 2px solid lightgrey; }')
-        bottomSplitterWidget.addWidget(topSplitterWidget)
-        bottomSplitterWidget.addWidget(predictionControlWidget)
+        self.predictionBottomSplitterWidget = QSplitter(Qt.Orientation.Vertical)
+        self.predictionBottomSplitterWidget.setStyleSheet('QSplitter::handle {border: 2px solid lightgrey; }')
+        self.predictionBottomSplitterWidget.addWidget(self.predictionTopSplitterWidget)
+        self.predictionBottomSplitterWidget.addWidget(predictionControlWidget)
 
         # --- Main Prediction Tab Layout ---
         prediction_tab_layout = QVBoxLayout(self.prediction_tab)
-        prediction_tab_layout.addWidget(bottomSplitterWidget)
+        prediction_tab_layout.addWidget(self.predictionBottomSplitterWidget)
 
     # sets up the layout and widgets for the re-training tab
     def setupRetrainTab(self):
         # --- Input File Section ---
         retrainInputFileLabel = self.createLabel("Input folder:")
-        self.retrainInputDirButton = self.createButton("Browse", self.loadRetrainInputDirectory)
+        self.retrainInputDirButton = self.createButton("Change Folder", self.loadRetrainInputDirectory)
         self.retrainSelectAllButton = self.createButton("Select All", self.selectAllRetrainFiles)
         self.retrainDeselectAllButton = self.createButton("Deselect All", self.deselectAllRetrainFiles)
 
@@ -460,7 +475,7 @@ class PyMarAiGuiApp(QDialog):
             self.prediction_show_contour = self.settings.value("showContourPrediction", "false") == "true"
             self.prediction_gradient_colormap = self.settings.value("gradientColormapPrediction", "jet")
             self.prediction_filled_color = QColor(self.settings.value("filledColorPrediction", "#0078d7"))
-            self.prediction_contour_color = QColor(self.settings.value("contourColorPrediction", "#a6d8fa"))
+            self.prediction_contour_color = QColor(self.settings.value("contourColorPrediction", "#aa0000"))
 
             gradient_checkbox = self.prediction_gradient_checkbox = QCheckBox("Gradient")
             filled_checkbox = self.prediction_filled_checkbox = QCheckBox("Filled")
@@ -2843,6 +2858,9 @@ class ScaledLabel(QLabel):
         self.updatePixmap()
         self.zoom_changed_signal.emit(self.zoom_factor)
 
+    def getZoom(self):
+        return self.zoom_factor
+
     def zoomIn(self):
         if self.zoom_factor < 10:
             self.setZoom(self.zoom_factor + 1)
@@ -2860,6 +2878,10 @@ class ScaledLabel(QLabel):
 
 # main function to start GUI
 def main():
+    QCoreApplication.setApplicationVersion(__version__);
+    QCoreApplication.setOrganizationName("Helmholtz-Zentrum Dresden-Rossendorf");
+    QCoreApplication.setOrganizationDomain("hzdr.de");
+    QCoreApplication.setApplicationName("PyMarAI");
     app = QApplication(sys.argv)
     config = AppConfig()
     window = PyMarAiGuiApp(config)
