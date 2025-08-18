@@ -205,19 +205,31 @@ class MarAiBase(ABC):
                 new_filename = f"{base}_m{microscope_number}.v"
             else:
                 continue
-            os.rename(old_path, os.path.join(output_dir, new_filename))
-            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
 
-        # --- Move .rdf from nnunet_output_dir to output_dir ---
+            try:
+              logger.debug(f"Moving {old_path} → {os.path.join(output_dir, new_filename)}")
+              os.rename(old_path, os.path.join(output_dir, new_filename))
+            except Exception as e:
+              logger.error(f"Could not move {old_path} → {os.path.join(output_dir, new_filename)}: {e}")
+
+        # --- Move .rdf from nnunet_output_dir to output_dir and .v as _cnn.v ---
         logger.info("Moving roi2rdf outputs from nnunet_output to output_dir...")
         for filename in os.listdir(nnunet_output_dir):
-            if not filename.endswith('.rdf'):
-                continue
             old_path = os.path.join(nnunet_output_dir, filename)
-            base = os.path.basename(filename)[:-4]
-            new_filename = f"{base}_m{microscope_number}.rdf"
-            os.rename(old_path, os.path.join(output_dir, new_filename))
-            logger.debug(f"Moved {old_path} → {os.path.join(output_dir, new_filename)}")
+            if filename.endswith('.rdf'):
+                base = os.path.basename(filename)[:-4]
+                new_filename = f"{base}_m{microscope_number}.rdf"
+            elif filename.endswith('.v'):
+                base = os.path.basename(filename)[:-2]
+                new_filename = f"{base}_m{microscope_number}_cnn.v"
+            else:
+                continue
+
+            try:
+              logger.debug(f"Moving {old_path} → {os.path.join(output_dir, new_filename)}")
+              os.rename(old_path, os.path.join(output_dir, new_filename))
+            except Exception as e:
+              logger.error(f"Could not move {old_path} → {os.path.join(output_dir, new_filename)}: {e}")
 
         # Cleanup
         shutil.rmtree(tempDir)

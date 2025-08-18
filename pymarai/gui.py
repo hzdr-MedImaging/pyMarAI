@@ -1356,7 +1356,7 @@ class PyMarAiGuiApp(QMainWindow):
 
             # clean up Thrass output files
             for fname in os.listdir(self.hiddenOutputDir):
-                if fname.startswith(matched_base + "_cnn") and fname.endswith(".v"):
+                if fname.startswith(matched_base + "_cnn_") and fname.endswith(".v"):
                     try:
                         os.remove(os.path.join(self.hiddenOutputDir, fname))
                         signals.progress_message.emit(f"[INFO] Deleted Thrass output file: {fname}\n")
@@ -2473,10 +2473,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
         self.switchElementsToPrediction(False)
-
-        # auto-apply mask overlay after prediction ends
-        if self.previewList:
-            self.applyPredictionMask()
 
     def retrainButtonPressed(self):
         pass
