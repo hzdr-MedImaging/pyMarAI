@@ -11,6 +11,7 @@ import pmedio
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+import xlsxwriter
 import cv2
 import csv
 import re
@@ -1960,7 +1961,7 @@ class PyMarAiGuiApp(QDialog):
                             data_row = line.strip().split()
                             if data_row:
                                 # clean the filename before appending it to the table_data
-                                cleaned_filename = re.sub(r'_(GOOD|BAD)', '', data_row[0])
+                                cleaned_filename = re.sub(r'_m\d+_(GOOD|BAD)', '', data_row[0])
                                 data_row[0] = cleaned_filename
                                 table_data.append(data_row)
 
@@ -2003,9 +2004,13 @@ class PyMarAiGuiApp(QDialog):
         layout.addWidget(table_widget)
 
         button_layout = QHBoxLayout()
-        save_button = QPushButton("Save as CSV", dialog)
-        save_button.clicked.connect(lambda: self.saveTableAsCsv(header, data))
-        button_layout.addWidget(save_button)
+        save_csv_button = QPushButton("Save as CSV", dialog)
+        save_csv_button.clicked.connect(lambda: self.saveTableAsCsv(header, data))
+        button_layout.addWidget(save_csv_button)
+
+        save_excel_button = QPushButton("Save as Excel", dialog)
+        save_excel_button.clicked.connect(lambda: self.saveTableAsExcel(header, data))
+        button_layout.addWidget(save_excel_button)
 
         close_button = QPushButton("Close", dialog)
         close_button.clicked.connect(dialog.close)
@@ -2026,6 +2031,24 @@ class PyMarAiGuiApp(QDialog):
                 QMessageBox.information(self, "Success", f"Statistics table saved to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"An error occurred while saving the file: {e}")
+
+    # saves the statistics table data to an Excel file selected by the user
+    def saveTableAsExcel(self, header, data):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Statistics Table", "", "Excel Files (*.xlsx)")
+        if file_path:
+            try:
+                workbook = xlsxwriter.Workbook(file_path)
+                worksheet = workbook.add_worksheet()
+                for col_num, col_name in enumerate(header):
+                    worksheet.write(0, col_num, col_name)
+                for row_num, row_data in enumerate(data, start=1):
+                    for col_num, cell_value in enumerate(row_data):
+                        worksheet.write(row_num, col_num, cell_value)
+
+                workbook.close()
+                QMessageBox.information(self, "Success", f"Statistics table saved to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"An error occurred while saving the Excel file:\n{e}")
 
     def onTabChanged(self, index):
         if index == 0:
