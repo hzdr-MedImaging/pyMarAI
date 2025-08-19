@@ -165,7 +165,7 @@ class MarAiBase(ABC):
 
         # --- Run mic2ecat ---
         logger.info("Running mic2ecat...")
-        mic2ecat_cmd = f"cd {tempDir} && {self.mic2ecat_path} -j {microscope_number} *.tif"
+        mic2ecat_cmd = f"cd {tempDir} && find . -maxdepth 1 -name '*.tif' -or -name '*.png' | xargs {self.mic2ecat_path} -j {microscope_number} -v"
         self.runCommand(mic2ecat_cmd, stream_output=True)
 
         # --- Symlink mic2ecat output in nnunet_input_dir ---
@@ -193,7 +193,7 @@ class MarAiBase(ABC):
         nnunet_thread.join()
 
         # --- Run roi2rdf ---
-        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} *.v"
+        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} -v *.v"
         self.runCommand(roi2rdf_cmd, stream_output=True)
 
         # --- Move raw _0000.v from tempDir to output_dir ---
