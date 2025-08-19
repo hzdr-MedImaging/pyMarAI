@@ -191,9 +191,6 @@ class PyMarAiGuiApp(QMainWindow):
         imagePreviewContainerSubLayout.addLayout(prevNextButtonsHLayout)
 
         # --- Mask Display Options ---
-        self.correct_mask_button = QPushButton("Correct Mask")
-        self.correct_mask_button.clicked.connect(self.correct_mask)
-
         mask_options_group_box = self.setupMaskDisplayOptions("prediction")
 
         self.zoom_percent_label = QLabel("100%")
@@ -214,7 +211,6 @@ class PyMarAiGuiApp(QMainWindow):
 
         maskControlsVLayout = QVBoxLayout()
         maskControlsVLayout.addSpacing(21)
-        maskControlsVLayout.addWidget(self.correct_mask_button)
         maskControlsVLayout.addWidget(mask_options_group_box)
         maskControlsVLayout.addWidget(zoomLevelGroupBox)
         maskControlsVLayout.addStretch()
@@ -2252,150 +2248,6 @@ class PyMarAiGuiApp(QMainWindow):
         for item in untagged_items:
             item.setSelected(True)
 
-
-    def correct_mask(self):
-
-        # 1. Open file dialog for new .rdf
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Corrected Mask", "", "RDF Files (*.rdf)"
-        )
-        if not file_path:
-            return  # User cancelled
-
-        # 2. Get the file selected in the GUI and check its status
-        selected_items = self.inputFileListWidget.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "Warning", "Please select a file from the list to correct.")
-            return
-
-        full_input_path = selected_items[0].data(Qt.UserRole)
-        status = self.file_status.get(full_input_path)
-
-        if status != "BAD":
-            QMessageBox.warning(self, "Warning", "You can only correct a file with a 'BAD' status.")
-            return
-
-        # 3. Check that the new RDF file's basename matches the selected file's basename
-        selected_file_basename = os.path.splitext(os.path.basename(full_input_path))[0]
-        new_rdf_basename = os.path.splitext(os.path.basename(file_path))[0]
-
-        if selected_file_basename != new_rdf_basename:
-            QMessageBox.warning(self, "Warning",
-                                "The basename of the selected RDF file does not match the basename of the file in the list.")
-            return
-
-        # Ensure hidden output directory exists
-        os.makedirs(self.hiddenOutputDir, exist_ok=True)
-
-        # 4. Find the existing rdf of interest in the hidden output folder
-        old_rdf_path = None
-
-        # Loop through files to find a match
-        for f in os.listdir(self.hiddenOutputDir):
-            if f.lower().endswith(".rdf") and os.path.splitext(f)[0].startswith(new_rdf_basename):
-                old_rdf_path = os.path.join(self.hiddenOutputDir, f)
-                break  # Exit the loop once a match is found
-
-        if not old_rdf_path:
-            QMessageBox.critical(self, "Error", f"No existing RDF file found matching {new_rdf_basename}.")
-            return
-
-        # 5. Prepare new file name (must match old rdf's basename with tags)
-        old_rdf_name = os.path.basename(old_rdf_path)
-        new_rdf_path = os.path.join(self.hiddenOutputDir, old_rdf_name)
-
-        # 6. Rename old one with timestamped _old
-        base, ext = os.path.splitext(old_rdf_path)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        old_backup = f"{base}_old_{timestamp}{ext}"
-        try:
-            os.rename(old_rdf_path, old_backup)
-        except OSError as e:
-            QMessageBox.critical(self, "Error", f"Failed to rename old RDF file: {e}")
-            return
-
-        # 7. Copy selected rdf as replacement (renamed to match old rdf name)
-        try:
-            shutil.copy(file_path, new_rdf_path)
-        except shutil.Error as e:
-            QMessageBox.critical(self, "Error", f"Failed to copy new RDF file: {e}")
-            return
-
-        # 8. Delete old cnn mask before running thrass
-        matched_base = os.path.splitext(old_rdf_name)[0]
-        old_cnn_v_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn_BAD.v")
-        if os.path.exists(old_cnn_v_path):
-            try:
-                os.remove(old_cnn_v_path)
-            except OSError as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete old CNN mask: {e}")
-                return
-
-        # 9. Run thrass on corresponding .v file
-        thrass_command = ["thrass", "-t", "cnnPrepare", "-b", matched_base + ".v"]
-        env = os.environ.copy()
-        result = subprocess.run(
-            thrass_command,
-            capture_output=True,
-            text=True,
-            cwd=self.hiddenOutputDir,
-            env=env
-        )
-
-        if result.stdout:
-            print("Thrass stdout:\n", result.stdout)
-        if result.stderr:
-            print("Thrass stderr:\n", result.stderr)
-        if result.returncode != 0:
-            QMessageBox.critical(
-                self,
-                "Thrass Failed",
-                f"Thrass failed with exit code {result.returncode}\n{result.stderr}"
-            )
-            return
-
-        # 10. Wait for generated _cnn.v file
-        generated_cnn_v_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn.v")
-        wait_time = 0
-        while not os.path.exists(generated_cnn_v_path) and wait_time < 5:
-            time.sleep(0.5)
-            wait_time += 0.5
-
-        if not os.path.exists(generated_cnn_v_path):
-            QMessageBox.critical(
-                self,
-                "Mask Generation Failed",
-                f"Could not find generated CNN mask: {generated_cnn_v_path}"
-            )
-            return
-
-        # 11. After thrass, clean up generated numbered files
-        generated_dir = self.hiddenOutputDir
-        for filename in os.listdir(generated_dir):
-            if filename.startswith(matched_base) and "_cnn_" in filename and filename.endswith(".v"):
-                try:
-                    base_part, numbered_part = filename.rsplit('_cnn_', 1)
-                    if numbered_part.isdigit():
-                        os.remove(os.path.join(generated_dir, filename))
-                except ValueError:
-                    continue
-
-        # 12. Rename the main generated CNN file
-        renamed_cnn_v_path = os.path.join(self.hiddenOutputDir, matched_base + "_cnn_BAD.v")
-        try:
-            os.rename(generated_cnn_v_path, renamed_cnn_v_path)
-        except OSError as e:
-            QMessageBox.critical(self, "Error", f"Failed to rename CNN mask: {e}")
-            return
-
-        # 13. Display a success message
-        QMessageBox.information(
-            self,
-            "Mask Corrected",
-            f"Corrected RDF saved as {os.path.basename(new_rdf_path)}\n"
-            f"Backup created: {os.path.basename(old_backup)}\n"
-            f"CNN mask generated and renamed: {os.path.basename(renamed_cnn_v_path)}"
-        )
 
     ####################################################
     # handle the event of Run Prediction button pressing
