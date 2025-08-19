@@ -2065,10 +2065,6 @@ class PyMarAiGuiApp(QMainWindow):
         if not self.current_preview_filename:
             return
 
-        if not self.removeMaskButton.isEnabled():
-            self.showProgressMessage("[ERROR] Apply a mask before marking as GOOD.")
-            return
-
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
 
         output_dir = self.hiddenOutputDir
@@ -2111,10 +2107,6 @@ class PyMarAiGuiApp(QMainWindow):
     # mark the current file as "bad"
     def markFileAsBad(self):
         if not self.current_preview_filename:
-            return
-
-        if not self.removeMaskButton.isEnabled():
-            self.showProgressMessage("[ERROR] Apply a mask before marking as BAD.")
             return
 
         base_input, _ = os.path.splitext(os.path.basename(self.current_preview_filename))
