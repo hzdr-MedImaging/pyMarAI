@@ -33,6 +33,7 @@ class LoginDialog(QDialog):
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
+        self.password_edit.setFocus()
 
     def get_credentials(self):
         return self.username_edit.text(), self.password_edit.text()
