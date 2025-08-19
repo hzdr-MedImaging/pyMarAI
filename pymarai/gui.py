@@ -189,14 +189,7 @@ class PyMarAiGuiApp(QMainWindow):
         prevNextButtonsHLayout.addStretch()
         imagePreviewContainerSubLayout.addLayout(prevNextButtonsHLayout)
 
-        # --- Mask Buttons and Mask Display Options ---
-        self.applyMaskButton = self.createButton("Apply Mask", self.applyPredictionMask)
-        self.removeMaskButton = self.createButton("Remove Mask", self.removePredictionMask)
-
-        maskButtonsHLayout = QHBoxLayout()
-        maskButtonsHLayout.addWidget(self.applyMaskButton)
-        maskButtonsHLayout.addWidget(self.removeMaskButton)
-
+        # --- Mask Display Options ---
         mask_options_group_box = self.setupMaskDisplayOptions("prediction")
 
         self.zoom_percent_label = QLabel("100%")
@@ -217,7 +210,6 @@ class PyMarAiGuiApp(QMainWindow):
 
         maskControlsVLayout = QVBoxLayout()
         maskControlsVLayout.addSpacing(21)
-        maskControlsVLayout.addLayout(maskButtonsHLayout)
         maskControlsVLayout.addWidget(mask_options_group_box)
         maskControlsVLayout.addWidget(zoomLevelGroupBox)
         maskControlsVLayout.addStretch()
@@ -576,8 +568,6 @@ class PyMarAiGuiApp(QMainWindow):
         if os.path.isdir(self.selectedRetrainInputDirectory):
             self.loadRetrainFilesFromDirectory(self.selectedRetrainInputDirectory)
 
-        self.applyMaskButton.setEnabled(False)
-        self.removeMaskButton.setEnabled(False)
         self.retrainApplyMaskButton.setEnabled(False)
         self.retrainRemoveMaskButton.setEnabled(False)
         self.markGoodButton.setEnabled(False)
@@ -952,24 +942,11 @@ class PyMarAiGuiApp(QMainWindow):
             full_path = self.previewList[0]
             self.current_preview_filename = full_path
 
-            # check the status of the single currently previewed file
-            status = self.file_status.get(full_path)
-            has_status = status in ("TO DO", "GOOD", "BAD")
-
-            # check if the "Remove Mask" button is enabled
-            is_mask_applied = self.removeMaskButton.isEnabled()
-
-            # enable the GOOD/BAD buttons only if the file has a status AND a mask is applied
-            self.markGoodButton.setEnabled(has_status and is_mask_applied)
-            self.markBadButton.setEnabled(has_status and is_mask_applied)
-
             # show the first image in the selection
             self.showImageAtIndex(self.previewIndex)
         else:
             # handle case where no files are selected
             self.previewList = []
-            self.applyMaskButton.setEnabled(False)
-            self.removeMaskButton.setEnabled(False)
             self.markGoodButton.setEnabled(False)
             self.markBadButton.setEnabled(False)
 
@@ -1124,48 +1101,64 @@ class PyMarAiGuiApp(QMainWindow):
         self.imageFilenameLabel.setText(filename)
 
         self.current_preview_filename = full_input_path
-
-        # reset state
-        self.applyMaskButton.setEnabled(False)
-        self.removeMaskButton.setEnabled(False)
         self.originalPredictionImage = None
         self.imagePreviewLabel.setText("Loading...")
 
         try:
+            # load original image
             image = Image.open(full_input_path)
             image = ImageOps.exif_transpose(image)
             if image.mode != "RGB":
                 image = image.convert("RGB")
-
             self.originalPredictionImage = image
 
-            if full_input_path in self.predictionMaskedPixmaps:
-                pixmap = self.predictionMaskedPixmaps[full_input_path]
+            # check if analyzed
+            status = self.file_status.get(full_input_path)
+            is_analyzed = status in ("TO DO", "GOOD", "BAD")
+
+            if is_analyzed:
+                # mask overlay (auto applied)
+                if full_input_path not in self.predictionMaskedPixmaps:
+                    mask_settings = {
+                        'show_gradient': self.prediction_show_gradient,
+                        'show_filled': self.prediction_show_filled,
+                        'show_contour': self.prediction_show_contour,
+                        'gradient_colormap': self.prediction_gradient_colormap,
+                        'filled_color': self.prediction_filled_color,
+                        'contour_color': self.prediction_contour_color
+                    }
+                    pixmap = self.process_single_image_and_mask(
+                        full_input_path,
+                        self.selectedInputDirectory,
+                        mask_settings,
+                        signals=None
+                    )
+                    self.predictionMaskedPixmaps[full_input_path] = pixmap
+                else:
+                    pixmap = self.predictionMaskedPixmaps[full_input_path]
             else:
+                # no analysis yet → show plain image
                 qimg = QImage(image.tobytes("raw", "RGB"),
                               image.width, image.height,
                               QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimg)
 
+            # display
             self.imagePreviewLabel.setPixmap(pixmap)
             self.imagePreviewLabel.setMinimumWidth(100)
             self.imagePreviewLabel.setMinimumHeight(100)
             self.imagePreviewLabel.setText("")
 
-            if self.current_preview_filename in self.predictionMaskedPixmaps:
-                self.applyMaskButton.setEnabled(False)
-                self.removeMaskButton.setEnabled(True)
-            else:
-                self.removeMaskButton.setEnabled(False)
-                is_analyzed = self.file_status.get(self.current_preview_filename) in ("TO DO", "GOOD", "BAD")
-                self.applyMaskButton.setEnabled(is_analyzed)
+            # GOOD/BAD marking enabled only if analyzed
+            self.markGoodButton.setEnabled(is_analyzed)
+            self.markBadButton.setEnabled(is_analyzed)
 
         except Exception as e:
             self.imagePreviewLabel.setText("Failed to load image.\n")
-            self.update_progress_text_signal.emit(f"[ERROR] Error loading image '{full_input_path}': {e}.\n")
+            self.update_progress_text_signal.emit(
+                f"[ERROR] Error loading image '{full_input_path}': {e}.\n"
+            )
             self.originalPredictionImage = None
-            self.applyMaskButton.setEnabled(False)
-            self.removeMaskButton.setEnabled(False)
             self.markGoodButton.setEnabled(False)
             self.markBadButton.setEnabled(False)
 
@@ -1282,8 +1275,16 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainRemoveMaskButton.setEnabled(False)
 
     # generates the CNN mask using thrass and overlays it on the original image based on the selected mask style
-    def process_single_image_and_mask(self, filename, input_dir, mask_settings, signals):
+    def process_single_image_and_mask(self, filename, input_dir, mask_settings, signals=None):
 
+        def emit(msg):
+            if signals:
+                try:
+                    signals.progress_message.emit(msg)
+                except Exception:
+                    pass
+
+        # resolve full path
         if os.path.isabs(filename) and os.path.exists(filename):
             full_input_path = filename
         else:
@@ -1291,48 +1292,38 @@ class PyMarAiGuiApp(QMainWindow):
 
         base_name = os.path.splitext(os.path.basename(full_input_path))[0]
 
-        # Load the original image first
+        # load the original image first
         original_image_pil = Image.open(full_input_path)
         original_image_pil = ImageOps.exif_transpose(original_image_pil)
         if original_image_pil.mode != "RGB":
             original_image_pil = original_image_pil.convert("RGB")
 
-        # Check for the hidden output directory
+        # check for the hidden output directory
         if not os.path.isdir(self.hiddenOutputDir):
-            signals.progress_message.emit(f"[ERROR] Output directory not found: {self.hiddenOutputDir}\n")
+            emit(f"[ERROR] Output directory not found: {self.hiddenOutputDir}\n")
             return self._load_and_convert_image(full_input_path)
 
-        # find all relevant files for the current base_name
-        all_matching_files = [f for f in os.listdir(self.hiddenOutputDir) if f.startswith(base_name)]
+        # find all files in the directory that start with the base name and contain "_cnn"
+        matching_files = [f for f in os.listdir(self.hiddenOutputDir) if f.startswith(base_name) and "_cnn" in f]
 
-        # find the primary .v file
-        v_files = [f for f in all_matching_files if f.endswith('.v') and '_cnn' not in f]
-        v_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
-
-        if not v_files:
-            signals.progress_message.emit(
-                f"[WARNING] No matching .v file found for {base_name}. Skipping mask overlay.\n")
-            return self._load_and_convert_image(full_input_path)
-
-        matched_v_file = v_files[0]
-        matched_base = os.path.splitext(matched_v_file)[0]
-
-        # now, find the corresponding _cnn.v file
-        mask_file_to_use = os.path.join(self.hiddenOutputDir, f"{matched_base}_cnn.v")
-
-        if not os.path.exists(mask_file_to_use):
-            signals.progress_message.emit(
-                f"[WARNING] Corresponding CNN mask file not found: {mask_file_to_use}. Displaying original image.\n")
+        if not matching_files:
+            emit(f"[WARNING] Corresponding CNN mask file not found for {base_name}. Displaying original image.\n")
             combined_image_pil = original_image_pil.convert('RGBA')
-            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"), combined_image_pil.width,
-                          combined_image_pil.height, QImage.Format_RGBA8888)
+            qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
+                          combined_image_pil.width,
+                          combined_image_pil.height,
+                          QImage.Format_RGBA8888)
             return QPixmap.fromImage(qimg)
+
+        # sort by modification time to get the most recent one if multiple matches exist
+        matching_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
+        mask_file_to_use = os.path.join(self.hiddenOutputDir, matching_files[0])
 
         # load mask data
         mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
         if mask_data.max() > mask_data.min():
-            normalized_mask = ((mask_data - mask_data.min()) / (mask_data.max() - mask_data.min()) * 255).astype(
-                np.uint8)
+            normalized_mask = ((mask_data - mask_data.min()) /
+                               (mask_data.max() - mask_data.min()) * 255).astype(np.uint8)
         else:
             normalized_mask = np.zeros_like(mask_data, dtype=np.uint8)
 
@@ -1345,15 +1336,22 @@ class PyMarAiGuiApp(QMainWindow):
         # apply mask styles
         if mask_settings['show_gradient']:
             combined_image_pil = self.create_gradient_mask_overlay(
-                combined_image_pil, mask_pil, colormap_name=mask_settings['gradient_colormap'], alpha=150)
+                combined_image_pil, mask_pil,
+                colormap_name=mask_settings['gradient_colormap'],
+                alpha=150
+            )
 
         if mask_settings['show_filled']:
             combined_image_pil = self.create_filled_mask_overlay(
-                combined_image_pil, mask_pil, fill_color=mask_settings['filled_color'])
+                combined_image_pil, mask_pil,
+                fill_color=mask_settings['filled_color']
+            )
 
         if mask_settings['show_contour']:
             combined_image_pil = self.create_contour_mask_overlay(
-                combined_image_pil, mask_pil, contour_color=mask_settings['contour_color'])
+                combined_image_pil, mask_pil,
+                contour_color=mask_settings['contour_color']
+            )
 
         qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
                       combined_image_pil.width, combined_image_pil.height,
