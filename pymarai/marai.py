@@ -50,6 +50,9 @@ class MarAiBase(ABC):
         try:
             self.mic2ecat_path = self.cfg['utils']['mic2ecat']
             self.roi2rdf_path = self.cfg['utils']['roi2Rdf']
+            self.conda_path = self.cfg['utils']['conda']
+            self.nnunet_predict_path = self.cfg['utils']['nnunet_predict']
+            self.nnunet_train_path = self.cfg['utils']['nnunet_train']
         except KeyError as e:
             raise RuntimeError(f"[ERROR] Missing required path in config: {e}.\n")
 
@@ -117,7 +120,7 @@ class MarAiBase(ABC):
         folds_str = ' '.join(map(str, folds))
 
         return (
-            f"/usr/local/miniforge3/condabin/conda run -n {env} --live-stream nnUNetv2_predict "
+            f"{self.conda_path} run -n {env} --live-stream {self.nnunet_predict_path} "
             f"-d {dataset} -i {input_dir} -o {output_dir} "
             f"-f {folds_str} -tr {trainer} -c {config} -p {plans}"
         )
