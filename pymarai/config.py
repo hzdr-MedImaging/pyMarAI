@@ -68,7 +68,7 @@ class AppConfig(metaclass=Singleton):
         return self.nnunet
 
     # dynamically choose the first available machine based on CPU/GPU load
-    def get_best_available_host(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_best_available_host(self, username, password=None, ssh_keys=[]) -> Tuple[Optional[str], Optional[str]]:
         machines_data = self.machines
 
         if isinstance(machines_data, dict):
@@ -79,19 +79,22 @@ class AppConfig(metaclass=Singleton):
             logger.error("Invalid format for 'machines' configuration.")
             return None, None
 
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
         for entry in machines_list:
             for hostname, host_cfg in entry.items():
-                ssh_client = paramiko.SSHClient()
-                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
                 try:
-                    ssh_client.connect(hostname)
+                    if len(ssh_keys) > 0:
+                        ssh.connect(hostname, port=22, username=username, key_filename=ssh_keys[0])
+                    else:
+                        ssh.connect(hostname, port=22, username=username, password=password)
 
                     # Check CPU load
                     cpu_threshold = float(host_cfg.get("cpu_threshold", 1.0))
 
                     # remote command to get CPU load
-                    stdin, stdout, stderr = ssh_client.exec_command("cut -d' ' -f1 /proc/loadavg")
+                    stdin, stdout, stderr = ssh.exec_command("cut -d' ' -f1 /proc/loadavg")
                     cpu_load_str = stdout.read().decode().strip()
 
                     stdout.close()
@@ -102,7 +105,7 @@ class AppConfig(metaclass=Singleton):
 
                     if cpu_load > cpu_threshold:
                         logger.info(f"{hostname} skipped: CPU load {cpu_load:.2f} > {cpu_threshold}")
-                        ssh_client.close()
+                        ssh.close()
                         continue
 
                     # GPU host
@@ -110,7 +113,7 @@ class AppConfig(metaclass=Singleton):
                         gpu_threshold = int(host_cfg.get("gpu_threshold", 90))  # default 90%
 
                         # remote command to get GPU info
-                        stdin, stdout, stderr = ssh_client.exec_command(
+                        stdin, stdout, stderr = ssh.exec_command(
                             f"{self.utils['nvidia-smi']} --format=csv,noheader --query-gpu=index,utilization.gpu"
                         )
                         gpu_info_str = stdout.read().decode().strip()
@@ -134,16 +137,16 @@ class AppConfig(metaclass=Singleton):
 
                         if free_gpus:
                             logger.info(f"Selected GPU {free_gpus[0]} on {hostname}")
-                            ssh_client.close()
+                            ssh.close()
                             return hostname, free_gpus[0]
                         else:
                             logger.info(f"{hostname} skipped: all GPUs busy")
-                            ssh_client.close()
+                            ssh.close()
                             continue
 
                     # CPU-only host
                     logger.info(f"Selected CPU-only host {hostname}")
-                    ssh_client.close()
+                    ssh.close()
                     return hostname, None
 
                 except paramiko.AuthenticationException:
@@ -153,7 +156,7 @@ class AppConfig(metaclass=Singleton):
                 except Exception as e:
                     logger.error(f"General error checking {hostname}: {e}")
                 finally:
-                    ssh_client.close()
+                    ssh.close()
 
         logger.warning("No available host found")
         return None, None

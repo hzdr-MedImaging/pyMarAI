@@ -136,7 +136,7 @@ def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
     progress_callback = make_progress_callback(progress_pipe_connection, gui_log_fn)
 
     try:
-        hostname, gpu_id = AppConfig().get_best_available_host()
+        hostname, gpu_id = AppConfig().get_best_available_host(username, password, ssh_keys)
         if not hostname:
             raise RuntimeError("No available host found.")
 
