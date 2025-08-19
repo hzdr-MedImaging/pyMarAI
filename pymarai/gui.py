@@ -1801,7 +1801,7 @@ class PyMarAiGuiApp(QMainWindow):
                         shutil.copy2(src_path, dest_path)
                     elif ext == ".v":
                         if not os.path.exists(dest_path):
-                            os.symlink(src_path, dest_path)
+                            os.symlink(rel_src_path, dest_path)
                         # only .v files go to ROVER
                         files_to_open.append(dest_path)
                 except Exception as e:
