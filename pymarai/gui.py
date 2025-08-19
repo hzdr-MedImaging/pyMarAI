@@ -466,7 +466,7 @@ class PyMarAiGuiApp(QMainWindow):
         if tab_type == 'prediction':
             self.prediction_show_gradient = self.settings.value("showGradientPrediction", "false") == "true"
             self.prediction_show_filled = self.settings.value("showFilledPrediction", "false") == "true"
-            self.prediction_show_contour = self.settings.value("showContourPrediction", "false") == "true"
+            self.prediction_show_contour = self.settings.value("showContourPrediction", "true") == "true"
             self.prediction_gradient_colormap = self.settings.value("gradientColormapPrediction", "jet")
             self.prediction_filled_color = QColor(self.settings.value("filledColorPrediction", "#0078d7"))
             self.prediction_contour_color = QColor(self.settings.value("contourColorPrediction", "#aa0000"))
@@ -478,7 +478,7 @@ class PyMarAiGuiApp(QMainWindow):
         elif tab_type == 'retrain':
             self.retrain_show_gradient = self.settings.value("showGradientRetrain", "false") == "true"
             self.retrain_show_filled = self.settings.value("showFilledRetrain", "false") == "true"
-            self.retrain_show_contour = self.settings.value("showContourRetrain", "false") == "true"
+            self.retrain_show_contour = self.settings.value("showContourRetrain", "true") == "true"
             self.retrain_gradient_colormap = self.settings.value("gradientColormapRetrain", "jet")
             self.retrain_filled_color = QColor(self.settings.value("filledColorRetrain", "#0078d7"))
             self.retrain_contour_color = QColor(self.settings.value("contourColorRetrain", "#a6d8fa"))
@@ -2425,7 +2425,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.progressBarLabel.hide()
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
-        self.applyPredictionMask()
         self.switchElementsToPrediction(False)
 
     def retrainButtonPressed(self):
