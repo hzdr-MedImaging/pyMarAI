@@ -53,6 +53,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         self.microscopes = config.get_microscopes()
         self.defaultMicroscopeType = config.get_default_microscope()
+        self.utils = config.get_utils()
 
         self.settings = QSettings()
         self.selectedInputDirectory = self.settings.value("lastInputDir", os.getcwd())
@@ -1387,7 +1388,7 @@ class PyMarAiGuiApp(QMainWindow):
             if signals:
                 signals.progress_message.emit(f"Running thrass for retrain mask generation on {filename}...\n")
 
-            thrass_command = ["/usr/local/petlib/bin/thrass", "-t", "cnnPrepare", "-b", v_filename]
+            thrass_command = [self.utils['thrass'], "-t", "cnnPrepare", "-b", v_filename]
             result = subprocess.run(
                 thrass_command,
                 capture_output=True,
@@ -1790,7 +1791,7 @@ class PyMarAiGuiApp(QMainWindow):
             QMessageBox.warning(self, "Open in ROVER", "No valid files were found to open.")
             return
 
-        command = ["/usr/local/petlib/bin/rover", "-R", "1"] + files_to_open
+        command = [self.utils['rover'], "-R", "1"] + files_to_open
 
         self.update_progress_text_signal.emit(
             f"Opening {len(files_to_open)} file(s) in ROVER:\n"
@@ -1798,7 +1799,9 @@ class PyMarAiGuiApp(QMainWindow):
         )
 
         try:
-            subprocess.Popen(command, env=os.environ.copy())
+            my_env = os.environ.copy()
+            my_env['ACCEPT_ROVER_DISCLAIMER']='yes'
+            subprocess.Popen(command, env=my_env)
         except Exception as e:
             self.update_progress_text_signal.emit(f"[ERROR] Failed to open ROVER: {e}\n")
             QMessageBox.warning(self, "Error Opening ROVER",
@@ -1925,7 +1928,7 @@ class PyMarAiGuiApp(QMainWindow):
             if matching_v_file:
                 source_v_path = os.path.join(source_dir, matching_v_file)
                 try:
-                    command = ['/usr/local/petlib/bin/thrass', '-t', 'spheroids', '-e', source_v_path]
+                    command = [self.utils['thrass'], '-t', 'spheroids', '-e', source_v_path]
                     result = subprocess.run(command, capture_output=True, text=True, check=True, encoding='utf-8', env=os.environ.copy())
                     output_lines = result.stdout.strip().split('\n')
 

@@ -13,12 +13,16 @@ class AppConfig:
         self.microscopes = self.config.get("microscopes", [])
         self.default_microscope = self.config.get("default_microscope", "-")
         self.machines = self.config.get("machines", {})
+        self.utils = self.config.get("utils", {})
 
     def get_microscopes(self):
         return self.microscopes
 
     def get_default_microscope(self):
         return self.default_microscope
+
+    def get_utils(self):
+        return self.utils
 
     # dynamically choose the first available machine based on CPU/GPU load
     def get_best_available_host(self) -> Tuple[Optional[str], Optional[str]]:
