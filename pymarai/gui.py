@@ -1795,6 +1795,7 @@ class PyMarAiGuiApp(QMainWindow):
                 ext = os.path.splitext(f)[1]
                 dest_name = f.replace("_GOOD", "").replace("_BAD", "")
                 dest_path = os.path.join(corrections_dir, dest_name)
+                rel_src_path = os.path.relpath(src_path, start=corrections_dir)
 
                 try:
                     if ext == ".rdf":
