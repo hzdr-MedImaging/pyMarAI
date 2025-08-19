@@ -264,9 +264,9 @@ class MarAiLocal(MarAiBase):
     def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
                    progress_pattern=None, original_input_files_map=None):
         if isinstance(cmd, list):
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, env=os.environ.copy())
         else:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True,
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, env=os.environ.copy(),
                                        shell=True, executable="/bin/bash" if platform.system() != 'Windows' else None)
 
         if stream_output:
@@ -370,9 +370,8 @@ class MarAiRemote(MarAiBase):
 
         # add CUDA_VISIBLE_DEVICES for GPU-relevant commands
         gpu_tools = [
-            os.path.basename(self.mic2ecat_path),
-            os.path.basename(self.roi2rdf_path),
-            "nnUNetv2_predict"
+            "nnUNetv2_predict",
+            "nnUNetv2_train"
         ]
 
         if self.gpu_id is not None and any(tool in cmd_str for tool in gpu_tools):
