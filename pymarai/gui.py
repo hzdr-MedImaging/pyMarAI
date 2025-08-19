@@ -230,10 +230,10 @@ class PyMarAiGuiApp(QMainWindow):
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
         self.openRoverButton.setToolTip(
             "Opens all currently selected files in the ROVER application. It can also be triggered by double-clicking the file of interest.")
-        self.saveOutputButton = self.createButton("Export Results", self.saveSelectedOutputs)
+        self.saveOutputButton = self.createButton("Export Images", self.saveSelectedOutputs)
         self.saveOutputButton.setToolTip(
             "Saves the selected output files (.v and .rdf) to the user-selected directory.")
-        self.generateStatsButton = self.createButton("Generate Stats", self.generateStatisticsTable)
+        self.generateStatsButton = self.createButton("Generate CSV", self.generateStatisticsTable)
         self.generateStatsButton.setToolTip(
             "Generates a statistics table for all selected files that are marked as 'GOOD'.")
 
