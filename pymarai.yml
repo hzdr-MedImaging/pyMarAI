@@ -10,7 +10,10 @@ default_microscope: "-"
 utils:
   mic2ecat: "/usr/local/petlib/bin/mic2ecat"
   roi2Rdf: "/usr/local/petlib/bin/roi2Rdf"
-  nnunet_predict: "/opt/conda/envs/nnunet/bin/nnUNetv2_predict"
+  thrass: "/usr/local/petlib/bin/thrass"
+  rover: "/usr/local/petlib/bin/rover"
+  nnunet_predict: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_predict"
+  nnunet_train: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_train"
 
 nnunet:
   env: "nnunet-spheroids"
@@ -24,58 +27,58 @@ machines:
   saturn:
       ip: 149.220.74.18
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 1
   vega:
       ip: 149.220.74.70
       type: gpu
-      cpu_threshold: 1.0
-      gpu_threshold: 90
+      cpu_threshold: 40
+      gpu_threshold: 10
   lyra:
       ip: 149.220.74.204
       type: gpu
-      cpu_threshold: 1.0
-      gpu_threshold: 90
+      cpu_threshold: 60
+      gpu_threshold: 10
   atlas:
       ip: 149.220.74.144
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   janus:
       ip: 149.220.74.146
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   hati:
       ip: 149.220.74.154
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   kari:
       ip: 149.220.74.156
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   anthe:
       ip: 149.220.74.158
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   pan:
       ip: 149.220.74.161
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   orcus:
       ip: 149.220.74.136
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   proteus:
       ip: 149.220.74.142
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   narvi:
       ip: 149.220.74.148
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
   jupiter:
       ip: 149.220.74.134
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 30
   neptun:
       ip: 149.220.74.63
       type: cpu
-      cpu_threshold: 1.0
+      cpu_threshold: 40
