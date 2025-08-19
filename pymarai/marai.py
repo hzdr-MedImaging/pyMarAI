@@ -9,6 +9,8 @@ import logging
 import shlex
 import re
 
+from pymarai.config import AppConfig
+
 from abc import ABC
 
 logger = logging.getLogger(__name__)
@@ -22,10 +24,13 @@ class UserCancelledError(Exception):
     pass
 
 class MarAiBase(ABC):
-    def __init__(self, cfg_path, hostname=platform.node(), stop_event=None, gpu_id=None):
-        # load config file
-        cfg_path = cfg_path or "/usr/local/etc/pymarai.yml"
-        self.cfg = self._load_config(cfg_path)
+    def __init__(self, hostname=platform.node(), stop_event=None, gpu_id=None):
+
+        # get config sections
+        config = AppConfig()
+        self.utils = config.get_utils()
+        self.machines = config.get_machines()
+        self.nnunet_cfg = config.get_nnunet()
 
         self.nnunet_v_output_dir = None
         self.nnunet_results_folder = None
@@ -48,36 +53,25 @@ class MarAiBase(ABC):
 
         # get paths for mic2ecat and roi2rdf
         try:
-            self.mic2ecat_path = self.cfg['utils']['mic2ecat']
-            self.roi2rdf_path = self.cfg['utils']['roi2Rdf']
-            self.conda_path = self.cfg['utils']['conda']
-            self.nnunet_predict_path = self.cfg['utils']['nnunet_predict']
-            self.nnunet_train_path = self.cfg['utils']['nnunet_train']
+            self.mic2ecat_path = self.utils['mic2ecat']
+            self.roi2rdf_path = self.utils['roi2Rdf']
+            self.conda_path = self.utils['conda']
+            self.nnunet_predict_path = self.utils['nnunet_predict']
+            self.nnunet_train_path = self.utils['nnunet_train']
         except KeyError as e:
             raise RuntimeError(f"[ERROR] Missing required path in config: {e}.\n")
-
-        # get nnunet section from config
-        self.nnunet_cfg = self.cfg.get('nnunet', {})
 
         # Event to signal when nnUNet process itself has finished
         self.nnunet_process_finished_event = threading.Event()
 
         # find matching host config
-        selected_host_cfg = self._find_host_config(self.cfg.get('machines', []), hostname)
+        selected_host_cfg = self._find_host_config(self.machines, hostname)
         if not selected_host_cfg:
             raise ValueError("[ERROR] No matching remote device found in config.\n")
 
         # extract details from config
         self.host_cfg = selected_host_cfg
         self.gpu_id = gpu_id
-
-    # config file loader
-    def _load_config(self, cfg_path):
-        if not os.path.exists(cfg_path):
-            logger.error(f"[ERROR] Config file not found: {cfg_path}.")
-            raise FileNotFoundError(f"[ERROR] Config file not found: {cfg_path}.")
-        with open(cfg_path, 'r') as f:
-            return yaml.safe_load(f)
 
     # find device config by hostname or use default
     def _find_host_config(self, machines_data, hostname=None):
@@ -260,8 +254,8 @@ class MarAiBase(ABC):
         return nnunet_v_path_in_temp, rdf_path_in_temp
 
 class MarAiLocal(MarAiBase):
-    def __init__(self, cfg_path=None, stop_event=None, gpu_id=None):
-        super().__init__(cfg_path, hostname=platform.node(), stop_event=stop_event, gpu_id=gpu_id)
+    def __init__(self, stop_event=None, gpu_id=None):
+        super().__init__(hostname=platform.node(), stop_event=stop_event, gpu_id=gpu_id)
 
     # run a local shell command
     def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
@@ -306,8 +300,8 @@ class MarAiLocal(MarAiBase):
             process_event_on_completion.set()  # signal that this command has completed
 
 class MarAiRemote(MarAiBase):
-    def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, cfg_path=None, stop_event=None, gpu_id=None):
-        super().__init__(cfg_path, hostname=hostname, stop_event=stop_event, gpu_id=gpu_id)
+    def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, stop_event=None, gpu_id=None):
+        super().__init__(hostname=hostname, stop_event=stop_event, gpu_id=gpu_id)
 
         # get remote host details from host config
         self.hostname = self.host_cfg.get('hostname')
