@@ -26,7 +26,7 @@ class AppConfig:
 
     # dynamically choose the first available machine based on CPU/GPU load
     def get_best_available_host(self) -> Tuple[Optional[str], Optional[str]]:
-        machines_data = self.config.get('machines', {})
+        machines_data = self.machines
 
         if isinstance(machines_data, dict):
             machines_list = [{k: v} for k, v in machines_data.items()]
@@ -68,7 +68,7 @@ class AppConfig:
 
                         # remote command to get GPU info
                         stdin, stdout, stderr = ssh_client.exec_command(
-                            "/usr/bin/nvidia-smi --format=csv,noheader --query-gpu=index,utilization.gpu"
+                            f"{self.utils['nvidia-smi']} --format=csv,noheader --query-gpu=index,utilization.gpu"
                         )
                         gpu_info_str = stdout.read().decode().strip()
 

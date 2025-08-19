@@ -12,6 +12,7 @@ utils:
   roi2Rdf: "/usr/local/petlib/bin/roi2Rdf"
   thrass: "/usr/local/petlib/bin/thrass"
   rover: "/usr/local/petlib/bin/rover"
+  nvidia-smi: "/usr/bin/nvidia-smi"
   conda: "/usr/local/miniforge3/condabin/conda"
   nnunet_predict: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_predict"
   nnunet_train: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_train"
