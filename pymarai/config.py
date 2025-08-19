@@ -1,6 +1,8 @@
 import yaml
 import paramiko
 import logging
+import platform
+import subprocess
 from typing import Optional, Tuple
 from threading import Lock
 
@@ -85,27 +87,37 @@ class AppConfig(metaclass=Singleton):
         for entry in machines_list:
             for hostname, host_cfg in entry.items():
                 try:
-                    if len(ssh_keys) > 0:
-                        ssh.connect(hostname, port=22, username=username, key_filename=ssh_keys[0])
+                    if hostname != platform.node():
+                        if len(ssh_keys) > 0:
+                            ssh.connect(hostname, port=22, username=username, key_filename=ssh_keys[0])
+                        else:
+                            ssh.connect(hostname, port=22, username=username, password=password)
+                        remote = True
                     else:
-                        ssh.connect(hostname, port=22, username=username, password=password)
+                        remote = False
 
                     # Check CPU load
                     cpu_threshold = float(host_cfg.get("cpu_threshold", 1.0))
 
                     # remote command to get CPU load
-                    stdin, stdout, stderr = ssh.exec_command("cut -d' ' -f1 /proc/loadavg")
-                    cpu_load_str = stdout.read().decode().strip()
-
-                    stdout.close()
-                    stdin.close()
-                    stderr.close()
+                    if remote:
+                        cmd = "cut -d' ' -f1 /proc/loadavg"
+                        stdin, stdout, stderr = ssh.exec_command(cmd)
+                        cpu_load_str = stdout.read().decode().strip()
+                        stdout.close()
+                        stdin.close()
+                        stderr.close()
+                    else:
+                        cmd = ["cut", "-d", " ", "-f1", "/proc/loadavg"]
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        cpu_load_str = result.stdout.strip()
 
                     cpu_load = float(cpu_load_str)
 
                     if cpu_load > cpu_threshold:
                         logger.info(f"{hostname} skipped: CPU load {cpu_load:.2f} > {cpu_threshold}")
-                        ssh.close()
+                        if remote:
+                            ssh.close()
                         continue
 
                     # GPU host
@@ -113,14 +125,17 @@ class AppConfig(metaclass=Singleton):
                         gpu_threshold = int(host_cfg.get("gpu_threshold", 90))  # default 90%
 
                         # remote command to get GPU info
-                        stdin, stdout, stderr = ssh.exec_command(
-                            f"{self.utils['nvidia-smi']} --format=csv,noheader --query-gpu=index,utilization.gpu"
-                        )
-                        gpu_info_str = stdout.read().decode().strip()
-
-                        stdout.close()
-                        stdin.close()
-                        stderr.close()
+                        if remote:
+                            cmd = f"{self.utils['nvidia-smi']} --format=csv,noheader --query-gpu=index,utilization.gpu"
+                            stdin, stdout, stderr = ssh.exec_command(cmd)
+                            gpu_info_str = stdout.read().decode().strip()
+                            stdout.close()
+                            stdin.close()
+                            stderr.close()
+                        else:
+                            cmd = [self.utils['nvidia-smi'], "--format=csv,noheader", "--query-gpu=index,utilization.gpu"]
+                            result = subprocess.run(cmd, capture_output=True, text=True)
+                            gpu_info_str = result.stdout.strip()
 
                         gpu_info_lines = gpu_info_str.splitlines()
 
@@ -137,16 +152,19 @@ class AppConfig(metaclass=Singleton):
 
                         if free_gpus:
                             logger.info(f"Selected GPU {free_gpus[0]} on {hostname}")
-                            ssh.close()
+                            if remote:
+                                ssh.close()
                             return hostname, free_gpus[0]
                         else:
                             logger.info(f"{hostname} skipped: all GPUs busy")
-                            ssh.close()
+                            if remote:
+                                ssh.close()
                             continue
 
                     # CPU-only host
                     logger.info(f"Selected CPU-only host {hostname}")
-                    ssh.close()
+                    if remote:
+                        ssh.close()
                     return hostname, None
 
                 except paramiko.AuthenticationException:
@@ -156,7 +174,8 @@ class AppConfig(metaclass=Singleton):
                 except Exception as e:
                     logger.error(f"General error checking {hostname}: {e}")
                 finally:
-                    ssh.close()
+                    if remote:
+                        ssh.close()
 
         logger.warning("No available host found")
         return None, None
