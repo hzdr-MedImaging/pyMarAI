@@ -193,6 +193,13 @@ class MarAiBase(ABC):
         roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} -v *.v"
         self.runCommand(roi2rdf_cmd, stream_output=True)
 
+        # --- Cleanup output_dir stuff from previous runs before storing new stuff
+        for filename_base in original_input_files_map:
+            filename_base = f"{filename_base}_m{microscope_number}"
+            for filename in os.listdir(output_dir):
+                if filename.startswith(filename_base):
+                    os.remove(os.path.join(output_dir, filename))
+
         # --- Move raw _0000.v from tempDir to output_dir ---
         logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
         for filename in os.listdir(tempDir):
