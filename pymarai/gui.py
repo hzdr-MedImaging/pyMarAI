@@ -1521,37 +1521,11 @@ class PyMarAiGuiApp(QMainWindow):
 
     # applies the selected mask style to the current prediction image
     def applyPredictionMask(self):
-        if not self.previewList:
-            return
+        # clear cached masked images
+        self.predictionMaskedPixmaps.clear()
 
-        self.setProgressBarText("Applying masks to all images...")
-        self.showProgressMessage("Starting batch mask application...")
-        self.enableWidgets(False)
-
-        mask_settings = {
-            'show_gradient': self.prediction_show_gradient,
-            'show_filled': self.prediction_show_filled,
-            'show_contour': self.prediction_show_contour,
-            'gradient_colormap': self.prediction_gradient_colormap,
-            'filled_color': self.prediction_filled_color,
-            'contour_color': self.prediction_contour_color
-        }
-
-        self.maskWorker = MaskBatchWorker(
-            app_instance=self,
-            filenames=self.previewList,
-            input_dir=self.selectedInputDirectory,
-            mask_settings=mask_settings,
-            tab_type="prediction"
-        )
-
-        self.maskWorker.progress.connect(self.updateProgressBarDetailed)
-        self.maskWorker.progress_message.connect(self.showProgressMessage)
-        self.maskWorker.errorOccurred.connect(self.onMaskingError)
-        self.maskWorker.result.connect(self.onMaskingFinishedBatch)
-        self.maskWorker.finished.connect(self.onMaskingFinishedAll)
-
-        self.maskWorker.start()
+        # refresh current image (to show original image instead of masked)
+        self.showImageAtIndex(self.previewIndex)
         self.updatePreviewList()
 
     def applyRetrainMask(self):
@@ -1586,15 +1560,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrainMaskWorker.finished.connect(self.onRetrainMaskingFinishedAll)
 
         self.retrainMaskWorker.start()
-
-    # removes the mask overlay and displays the original prediction image
-    def removePredictionMask(self):
-        # clear cached masked images
-        self.predictionMaskedPixmaps.clear()
-
-        # refresh current image (to show original image instead of masked)
-        self.showImageAtIndex(self.previewIndex)
-        self.updatePreviewList()
 
     # removes the mask overlay and displays the original re-training image
     def removeRetrainMask(self):
@@ -2480,23 +2445,24 @@ class PyMarAiGuiApp(QMainWindow):
         pass
 
     def updatePreviewLabel(self):
-        # refresh mask visualization for current preview
-        mask_settings = {
-            'show_gradient': self.prediction_show_gradient,
-            'show_filled': self.prediction_show_filled,
-            'show_contour': self.prediction_show_contour,
-            'gradient_colormap': self.prediction_gradient_colormap,
-            'filled_color': self.prediction_filled_color,
-            'contour_color': self.prediction_contour_color
-        }
-        pixmap = self.process_single_image_and_mask(
-            self.current_preview_filename,
-            self.selectedInputDirectory,
-            mask_settings
-        )
-        self.predictionMaskedPixmaps[self.current_preview_filename] = pixmap
-        self.imagePreviewLabel.setPixmap(pixmap)
-        self.imagePreviewLabel.setText("")
+        if self.current_preview_filename:
+          # refresh mask visualization for current preview
+          mask_settings = {
+              'show_gradient': self.prediction_show_gradient,
+              'show_filled': self.prediction_show_filled,
+              'show_contour': self.prediction_show_contour,
+              'gradient_colormap': self.prediction_gradient_colormap,
+              'filled_color': self.prediction_filled_color,
+              'contour_color': self.prediction_contour_color
+          }
+          pixmap = self.process_single_image_and_mask(
+              self.current_preview_filename,
+              self.selectedInputDirectory,
+              mask_settings
+          )
+          self.predictionMaskedPixmaps[self.current_preview_filename] = pixmap
+          self.imagePreviewLabel.setPixmap(pixmap)
+          self.imagePreviewLabel.setText("")
 
     # method to refresh mask with updates from corrections directory
     def refresh_mask(self):
