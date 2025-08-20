@@ -2561,7 +2561,7 @@ class PyMarAiGuiApp(QMainWindow):
                 # backup old RDF in hiddenOutputDir
                 if os.path.exists(rdf_user_path):
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    rdf_backup_name = rdf_user_file.replace(".rdf", f"_{timestamp}.rdf")
+                    rdf_backup_name = rdf_user_file.replace("_GOOD", "").replace("_BAD", "").replace(".rdf", f"_{timestamp}{status_suffix}.rdf")
                     rdf_backup_path = os.path.join(self.hiddenOutputDir, rdf_backup_name)
                     shutil.move(rdf_user_path, rdf_backup_path)
                     self.update_progress_text_signal.emit(f"[INFO] Renamed old RDF {rdf_user_path} to {rdf_backup_path}\n")
