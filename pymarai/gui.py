@@ -1098,9 +1098,8 @@ class PyMarAiGuiApp(QMainWindow):
 
         # draw filled contours but with overlaying original image
         mask = np.zeros(overlay.shape, np.uint8)
-        cv2.drawContours(mask, contours, -1, color, -1)
+        cv2.drawContours(mask, contours, -1, color, thickness=cv2.FILLED)
         overlay[:] = cv2.addWeighted(mask, alpha, overlay, beta=1.0, gamma=0.0)
-        cv2.drawContours(overlay, contours, -1, color, thickness=1)
 
         return Image.fromarray(overlay)
 
