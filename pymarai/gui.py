@@ -1802,7 +1802,19 @@ class PyMarAiGuiApp(QMainWindow):
 
                 try:
                     if ext == ".rdf":
+                        # make sure to remove an existing dest_path first
+                        if os.path.exists(dest_path):
+                            os.chmod(dest_path, 0o660) # ensure permission
+                            os.remove(dest_path)
+
+                        # copy rdf
                         shutil.copy2(src_path, dest_path)
+
+                        # make sure only BAD marked files can be edited/modified
+                        if "_BAD" in src_path:
+                            os.chmod(dest_path, 0o660)
+                        else:
+                            os.chmod(dest_path, 0o440)
                     elif ext == ".v":
                         if os.path.islink(dest_path):
                             os.remove(dest_path)
