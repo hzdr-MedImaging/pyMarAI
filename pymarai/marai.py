@@ -199,6 +199,9 @@ class MarAiBase(ABC):
             for filename in os.listdir(output_dir):
                 if filename.startswith(filename_base):
                     os.remove(os.path.join(output_dir, filename))
+            for filename in os.listdir(os.path.join(output_dir, "corrections")):
+                if filename.startswith(filename_base):
+                    os.remove(os.path.join(output_dir, "corrections", filename))
 
         # --- Move raw _0000.v from tempDir to output_dir ---
         logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
