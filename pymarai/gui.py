@@ -1786,11 +1786,8 @@ class PyMarAiGuiApp(QMainWindow):
             base, _ = os.path.splitext(os.path.basename(filename))
             clean_base = base.replace("_GOOD", "").replace("_BAD", "")
 
-            matching_files = [
-                f for f in output_files
-                if base in f and (f.endswith(".v") or f.endswith(".rdf")) and "_cnn" not in f
-            ]
-
+            pattern = re.compile(rf"^{re.escape(clean_base)}_m\d+(_BAD|_GOOD)?\.(v|rdf)")
+            matching_files = [f for f in output_files if pattern.match(f)]
             if not matching_files:
                 self.update_progress_text_signal.emit(
                     f"[ERROR] No valid .v or .rdf file found for '{filename}' (ignoring _cnn). Skipping.\n")
@@ -2480,8 +2477,8 @@ class PyMarAiGuiApp(QMainWindow):
             base_name = os.path.splitext(filename_only)[0]
 
             # find matching _mN files in corrections
-            pattern = re.compile(rf"^{re.escape(base_name)}_m\d+")
-            rdf_corr_candidates = [f for f in os.listdir(correction_dir) if f.endswith(".rdf") and pattern.match(f)]
+            pattern = re.compile(rf"^{re.escape(base_name)}_m\d+\.rdf")
+            rdf_corr_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
             if not rdf_corr_candidates:
                 self.update_progress_text_signal.emit(
                     f"[INFO] No corrections RDF for {self.current_preview_filename}\n")
@@ -2491,10 +2488,8 @@ class PyMarAiGuiApp(QMainWindow):
                 rdf_corr_path = os.path.join(correction_dir, rdf_corr_file)
 
                 # find matching user RDF in hiddenOutputDir (may have GOOD/BAD tag)
-                rdf_user_candidates = [
-                    f for f in os.listdir(self.hiddenOutputDir)
-                    if f.endswith(".rdf") and f.startswith(rdf_corr_file[:-4])
-                ]
+                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.rdf")
+                rdf_user_candidates = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
                 if not rdf_user_candidates:
                     self.update_progress_text_signal.emit(f"[WARNING] No user RDF for {rdf_corr_file}, skipping.\n")
                     continue
@@ -2521,7 +2516,8 @@ class PyMarAiGuiApp(QMainWindow):
                     self.update_progress_text_signal.emit(f"[WARNING] Could not compare RDFs: {e}\n")
 
                 # find matching .v file in corrections
-                v_candidates = [f for f in os.listdir(correction_dir) if f.endswith(".v") and pattern.match(f)]
+                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.v")
+                v_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
                 if not v_candidates:
                     self.update_progress_text_signal.emit(f"[WARNING] No .v file in corrections for {rdf_corr_file}\n")
                     continue
@@ -2531,7 +2527,7 @@ class PyMarAiGuiApp(QMainWindow):
 
                 # run thrass
                 self.update_progress_text_signal.emit(f"Running thrass on {v_file_name} in corrections...\n")
-                thrass_command = ["thrass", "-t", "cnnPrepare", "-b", v_file_name]
+                thrass_command = [self.utils['thrass'], "-t", "cnnPrepare", "-b", v_file_name]
                 env = os.environ.copy()
                 result = subprocess.run(
                     thrass_command, capture_output=True, text=True, cwd=correction_dir, env=env
@@ -2544,6 +2540,7 @@ class PyMarAiGuiApp(QMainWindow):
                     raise RuntimeError(f"Thrass failed with exit code {result.returncode} for {v_file_path}")
 
                 # handle CNN files
+                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+")
                 cnn_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f) and f.endswith("_cnn.v")]
                 if not cnn_candidates:
                     raise FileNotFoundError(f"Thrass cnn file not found for {v_file_name}")
@@ -2564,10 +2561,10 @@ class PyMarAiGuiApp(QMainWindow):
                 # backup old RDF in hiddenOutputDir
                 if os.path.exists(rdf_user_path):
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    rdf_backup_name = rdf_user_file.replace(".rdf", f"_old_{timestamp}.rdf")
+                    rdf_backup_name = rdf_user_file.replace(".rdf", f"_{timestamp}.rdf")
                     rdf_backup_path = os.path.join(self.hiddenOutputDir, rdf_backup_name)
                     shutil.move(rdf_user_path, rdf_backup_path)
-                    self.update_progress_text_signal.emit(f"[INFO] Renamed old RDF to {rdf_backup_name}\n")
+                    self.update_progress_text_signal.emit(f"[INFO] Renamed old RDF {rdf_user_path} to {rdf_backup_path}\n")
 
                 # rename and move new RDF
                 new_rdf_name = rdf_corr_file.replace(".rdf", f"{status_suffix}.rdf")
