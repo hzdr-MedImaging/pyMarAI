@@ -2468,10 +2468,31 @@ class PyMarAiGuiApp(QMainWindow):
         self.updateOutputBasenames()
         self.markAnalyzedFiles()
         self.switchElementsToPrediction(False)
+        self.updatePreviewLabel()
 
     def retrainButtonPressed(self):
         pass
 
+    def updatePreviewLabel(self):
+        # refresh mask visualization for current preview
+        mask_settings = {
+            'show_gradient': self.prediction_show_gradient,
+            'show_filled': self.prediction_show_filled,
+            'show_contour': self.prediction_show_contour,
+            'gradient_colormap': self.prediction_gradient_colormap,
+            'filled_color': self.prediction_filled_color,
+            'contour_color': self.prediction_contour_color
+        }
+        pixmap = self.process_single_image_and_mask(
+            self.current_preview_filename,
+            self.selectedInputDirectory,
+            mask_settings
+        )
+        self.predictionMaskedPixmaps[self.current_preview_filename] = pixmap
+        self.imagePreviewLabel.setPixmap(pixmap)
+        self.imagePreviewLabel.setText("")
+
+    # method to refresh mask with updates from corrections directory
     def refresh_mask(self):
         try:
             if not self.current_preview_filename:
@@ -2598,22 +2619,7 @@ class PyMarAiGuiApp(QMainWindow):
                     f"[INFO] No corrections RDF for {self.current_preview_filename}\n")
 
             # refresh mask visualization for current preview
-            mask_settings = {
-                'show_gradient': self.prediction_show_gradient,
-                'show_filled': self.prediction_show_filled,
-                'show_contour': self.prediction_show_contour,
-                'gradient_colormap': self.prediction_gradient_colormap,
-                'filled_color': self.prediction_filled_color,
-                'contour_color': self.prediction_contour_color
-            }
-            pixmap = self.process_single_image_and_mask(
-                self.current_preview_filename,
-                self.selectedInputDirectory,
-                mask_settings
-            )
-            self.predictionMaskedPixmaps[self.current_preview_filename] = pixmap
-            self.imagePreviewLabel.setPixmap(pixmap)
-            self.imagePreviewLabel.setText("")
+            self.updatePreviewLabel()
             self.update_progress_text_signal.emit("[INFO] Mask visualization refreshed.\n")
 
         except Exception as e:
