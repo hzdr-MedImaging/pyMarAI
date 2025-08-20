@@ -1064,7 +1064,7 @@ class PyMarAiGuiApp(QMainWindow):
         binary_mask = (mask_np > 0).astype(np.uint8)
 
         # find contours with OpenCV
-        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
         # convert RGB to RGBA
         overlay = cv2.cvtColor(original_image, cv2.COLOR_RGB2RGBA)
