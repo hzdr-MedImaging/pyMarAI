@@ -1079,23 +1079,30 @@ class PyMarAiGuiApp(QMainWindow):
         return Image.fromarray(overlay)
 
     # creates an overlay where the mask area is filled with a semi-transparent color
-    def create_filled_mask_overlay(self, original_image_pil, mask_pil, fill_color: QColor):
-        original_image_rgb = original_image_pil.convert('RGB')
+    def create_filled_mask_overlay(self, original_image_pil, mask_pil, fill_color: QColor, alpha=0.4):
+        original_image = np.array(original_image_pil.convert('RGB'))
         mask_np = np.array(mask_pil.convert('L'))
 
-        # Create an empty RGBA image for the overlay
-        overlay = Image.new('RGBA', original_image_rgb.size, (0, 0, 0, 0))
-        overlay_pixels = overlay.load()
+        # normalize mask to binary
+        binary_mask = (mask_np > 0).astype(np.uint8)
 
+        # find contours with OpenCV
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+
+        # convert RGB to RGBA
+        overlay = cv2.cvtColor(original_image, cv2.COLOR_RGB2RGBA)
+
+        # convert QColor to BGR(A)
         r, g, b, a = fill_color.getRgb()
-        a = min(a, 60)
+        color = (r, g, b, a)
 
-        for y in range(mask_np.shape[0]):
-            for x in range(mask_np.shape[1]):
-                if mask_np[y, x] > 0:
-                    overlay_pixels[x, y] = (r, g, b, a)
+        # draw filled contours but with overlaying original image
+        mask = np.zeros(overlay.shape, np.uint8)
+        cv2.drawContours(mask, contours, -1, color, -1)
+        overlay[:] = cv2.addWeighted(mask, alpha, overlay, beta=1.0, gamma=0.0)
+        cv2.drawContours(overlay, contours, -1, color, thickness=1)
 
-        return Image.alpha_composite(original_image_rgb.convert('RGBA'), overlay)
+        return Image.fromarray(overlay)
 
     # displays the image at the given index in the prediction preview
     def showImageAtIndex(self, index):
