@@ -2291,8 +2291,8 @@ class PyMarAiGuiApp(QMainWindow):
                 msg = QMessageBox()
                 msg.setIcon(QMessageBox.Question)
                 msg.setWindowTitle("Re-analyze Already Processed Files?")
-                msg.setText(f"{len(already_analyzed)} of the selected files have already been analyzed.\n"
-                            f"Do you want to include them for re-analysis?")
+                msg.setText(f"{len(already_analyzed)} of the selected files have already been analyzed.\n\n"
+                            f"Do you want to include them for re-analysis and reset their status to 'TO DO'?")
                 msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
                 result = msg.exec_()
 
