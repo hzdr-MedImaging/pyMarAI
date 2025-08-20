@@ -2491,112 +2491,111 @@ class PyMarAiGuiApp(QMainWindow):
             # find matching _mN files in corrections
             pattern = re.compile(rf"^{re.escape(base_name)}_m\d+\.rdf")
             rdf_corr_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
-            if not rdf_corr_candidates:
+            if rdf_corr_candidates:
+                for rdf_corr_file in rdf_corr_candidates:
+                    rdf_corr_path = os.path.join(correction_dir, rdf_corr_file)
+
+                    # find matching user RDF in hiddenOutputDir (may have GOOD/BAD tag)
+                    pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.rdf")
+                    rdf_user_candidates = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
+                    if not rdf_user_candidates:
+                        self.update_progress_text_signal.emit(f"[WARNING] No user RDF for {rdf_corr_file}, skipping.\n")
+                        continue
+
+                    rdf_user_file = rdf_user_candidates[0]
+                    rdf_user_path = os.path.join(self.hiddenOutputDir, rdf_user_file)
+
+                    # extract status suffix (_GOOD/_BAD) if present
+                    status_suffix = ""
+                    if "_GOOD" in rdf_user_file:
+                        status_suffix = "_GOOD"
+                    elif "_BAD" in rdf_user_file:
+                        status_suffix = "_BAD"
+
+                    # compare correction RDF and user RDF
+                    try:
+                        if os.path.exists(rdf_user_path) and filecmp.cmp(rdf_corr_path, rdf_user_path, shallow=False):
+                            self.update_progress_text_signal.emit(
+                                f"[INFO] RDF {rdf_corr_file} identical to {rdf_user_file}, skipping.\n"
+                            )
+                            continue
+                    except Exception as e:
+                        self.update_progress_text_signal.emit(f"[WARNING] Could not compare RDFs: {e}\n")
+
+                    # find matching .v file in corrections
+                    pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.v")
+                    v_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
+                    if not v_candidates:
+                        self.update_progress_text_signal.emit(f"[WARNING] No .v file in corrections for {rdf_corr_file}\n")
+                        continue
+
+                    v_file_name = v_candidates[0]
+                    v_file_path = os.path.join(correction_dir, v_file_name)
+
+                    # run thrass
+                    self.update_progress_text_signal.emit(f"Running thrass on {v_file_name} in corrections...\n")
+                    thrass_command = [self.utils['thrass'], "-t", "cnnPrepare", "-b", v_file_name]
+                    env = os.environ.copy()
+                    result = subprocess.run(
+                        thrass_command, capture_output=True, text=True, cwd=correction_dir, env=env
+                    )
+                    self.update_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
+                    if result.stderr:
+                        self.update_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
+
+                    if result.returncode != 0:
+                        raise RuntimeError(f"Thrass failed with exit code {result.returncode} for {v_file_path}")
+
+                    # handle CNN files
+                    pattern = re.compile(rf"^{re.escape(base_name)}_m\d+")
+                    cnn_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f) and f.endswith("_cnn.v")]
+                    if not cnn_candidates:
+                        raise FileNotFoundError(f"Thrass cnn file not found for {v_file_name}")
+
+                    cnn_file_name = cnn_candidates[0]
+                    cnn_path = os.path.join(correction_dir, cnn_file_name)
+
+                    # delete _cnn_005.v if exists
+                    cnn_005_candidates = [f for f in os.listdir(correction_dir) if
+                                          pattern.match(f) and f.endswith("_cnn_0005.v")]
+                    for f in cnn_005_candidates:
+                        try:
+                            os.remove(os.path.join(correction_dir, f))
+                            self.update_progress_text_signal.emit(f"[INFO] Deleted {f}\n")
+                        except Exception as e:
+                            self.update_progress_text_signal.emit(f"[WARNING] Could not delete {f}: {e}\n")
+
+                    # backup old RDF in hiddenOutputDir
+                    if os.path.exists(rdf_user_path):
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        rdf_backup_name = rdf_user_file.replace("_GOOD", "").replace("_BAD", "").replace(".rdf", f"_{timestamp}{status_suffix}.rdf")
+                        rdf_backup_path = os.path.join(self.hiddenOutputDir, rdf_backup_name)
+                        shutil.move(rdf_user_path, rdf_backup_path)
+                        self.update_progress_text_signal.emit(f"[INFO] Renamed old RDF {rdf_user_path} to {rdf_backup_path}\n")
+
+                    # rename and move new RDF
+                    new_rdf_name = rdf_corr_file.replace(".rdf", f"{status_suffix}.rdf")
+                    new_rdf_path = os.path.join(self.hiddenOutputDir, new_rdf_name)
+                    shutil.move(rdf_corr_path, new_rdf_path)
+
+                    # rename and move CNN file with status
+                    new_cnn_name = cnn_file_name.replace("_cnn.v", f"_cnn{status_suffix}.v")
+                    shutil.move(cnn_path, os.path.join(self.hiddenOutputDir, new_cnn_name))
+
+                    # delete symlink .v in corrections
+                    try:
+                        os.remove(v_file_path)
+                        self.update_progress_text_signal.emit(f"[INFO] Deleted symlink {v_file_name}\n")
+                    except Exception as e:
+                        self.update_progress_text_signal.emit(f"[WARNING] Could not delete {v_file_name}: {e}\n")
+
+                    self.update_progress_text_signal.emit(
+                        f"[INFO] Updated {new_rdf_name} and {new_cnn_name} → {self.hiddenOutputDir}\n"
+                    )
+
+            else:
                 self.update_progress_text_signal.emit(
                     f"[INFO] No corrections RDF for {self.current_preview_filename}\n")
-                return
-
-            for rdf_corr_file in rdf_corr_candidates:
-                rdf_corr_path = os.path.join(correction_dir, rdf_corr_file)
-
-                # find matching user RDF in hiddenOutputDir (may have GOOD/BAD tag)
-                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.rdf")
-                rdf_user_candidates = [f for f in os.listdir(self.hiddenOutputDir) if pattern.match(f)]
-                if not rdf_user_candidates:
-                    self.update_progress_text_signal.emit(f"[WARNING] No user RDF for {rdf_corr_file}, skipping.\n")
-                    continue
-
-                rdf_user_file = rdf_user_candidates[0]
-                rdf_user_path = os.path.join(self.hiddenOutputDir, rdf_user_file)
-
-                # extract status suffix (_GOOD/_BAD) if present
-                status_suffix = ""
-                if "_GOOD" in rdf_user_file:
-                    status_suffix = "_GOOD"
-                elif "_BAD" in rdf_user_file:
-                    status_suffix = "_BAD"
-
-                # compare correction RDF and user RDF
-                import filecmp
-                try:
-                    if os.path.exists(rdf_user_path) and filecmp.cmp(rdf_corr_path, rdf_user_path, shallow=False):
-                        self.update_progress_text_signal.emit(
-                            f"[INFO] RDF {rdf_corr_file} identical to {rdf_user_file}, skipping.\n"
-                        )
-                        continue
-                except Exception as e:
-                    self.update_progress_text_signal.emit(f"[WARNING] Could not compare RDFs: {e}\n")
-
-                # find matching .v file in corrections
-                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+(_BAD|_GOOD)?\.v")
-                v_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
-                if not v_candidates:
-                    self.update_progress_text_signal.emit(f"[WARNING] No .v file in corrections for {rdf_corr_file}\n")
-                    continue
-
-                v_file_name = v_candidates[0]
-                v_file_path = os.path.join(correction_dir, v_file_name)
-
-                # run thrass
-                self.update_progress_text_signal.emit(f"Running thrass on {v_file_name} in corrections...\n")
-                thrass_command = [self.utils['thrass'], "-t", "cnnPrepare", "-b", v_file_name]
-                env = os.environ.copy()
-                result = subprocess.run(
-                    thrass_command, capture_output=True, text=True, cwd=correction_dir, env=env
-                )
-                self.update_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
-                if result.stderr:
-                    self.update_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
-
-                if result.returncode != 0:
-                    raise RuntimeError(f"Thrass failed with exit code {result.returncode} for {v_file_path}")
-
-                # handle CNN files
-                pattern = re.compile(rf"^{re.escape(base_name)}_m\d+")
-                cnn_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f) and f.endswith("_cnn.v")]
-                if not cnn_candidates:
-                    raise FileNotFoundError(f"Thrass cnn file not found for {v_file_name}")
-
-                cnn_file_name = cnn_candidates[0]
-                cnn_path = os.path.join(correction_dir, cnn_file_name)
-
-                # delete _cnn_005.v if exists
-                cnn_005_candidates = [f for f in os.listdir(correction_dir) if
-                                      pattern.match(f) and f.endswith("_cnn_0005.v")]
-                for f in cnn_005_candidates:
-                    try:
-                        os.remove(os.path.join(correction_dir, f))
-                        self.update_progress_text_signal.emit(f"[INFO] Deleted {f}\n")
-                    except Exception as e:
-                        self.update_progress_text_signal.emit(f"[WARNING] Could not delete {f}: {e}\n")
-
-                # backup old RDF in hiddenOutputDir
-                if os.path.exists(rdf_user_path):
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    rdf_backup_name = rdf_user_file.replace("_GOOD", "").replace("_BAD", "").replace(".rdf", f"_{timestamp}{status_suffix}.rdf")
-                    rdf_backup_path = os.path.join(self.hiddenOutputDir, rdf_backup_name)
-                    shutil.move(rdf_user_path, rdf_backup_path)
-                    self.update_progress_text_signal.emit(f"[INFO] Renamed old RDF {rdf_user_path} to {rdf_backup_path}\n")
-
-                # rename and move new RDF
-                new_rdf_name = rdf_corr_file.replace(".rdf", f"{status_suffix}.rdf")
-                new_rdf_path = os.path.join(self.hiddenOutputDir, new_rdf_name)
-                shutil.move(rdf_corr_path, new_rdf_path)
-
-                # rename and move CNN file with status
-                new_cnn_name = cnn_file_name.replace("_cnn.v", f"_cnn{status_suffix}.v")
-                shutil.move(cnn_path, os.path.join(self.hiddenOutputDir, new_cnn_name))
-
-                # delete symlink .v in corrections
-                try:
-                    os.remove(v_file_path)
-                    self.update_progress_text_signal.emit(f"[INFO] Deleted symlink {v_file_name}\n")
-                except Exception as e:
-                    self.update_progress_text_signal.emit(f"[WARNING] Could not delete {v_file_name}: {e}\n")
-
-                self.update_progress_text_signal.emit(
-                    f"[INFO] Updated {new_rdf_name} and {new_cnn_name} → {self.hiddenOutputDir}\n"
-                )
 
             # refresh mask visualization for current preview
             mask_settings = {
