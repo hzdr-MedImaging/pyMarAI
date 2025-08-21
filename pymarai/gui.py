@@ -2203,24 +2203,30 @@ class PyMarAiGuiApp(QMainWindow):
 
     # select all files marked as GOOD in the list
     def selectAllGoodFiles(self):
+        self.inputFileListWidget.itemSelectionChanged.disconnect()
         self.inputFileListWidget.clearSelection()
         for i in range(self.inputFileListWidget.count()):
             item = self.inputFileListWidget.item(i)
             if "[GOOD]" in item.text():
                 item.setSelected(True)
+
+        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.updatePreviewList()
 
     # select all files marked as BAD in the list
     def selectAllBadFiles(self):
+        self.inputFileListWidget.itemSelectionChanged.disconnect()
         self.inputFileListWidget.clearSelection()
         for i in range(self.inputFileListWidget.count()):
             item = self.inputFileListWidget.item(i)
             if "[BAD]" in item.text():
                 item.setSelected(True)
+        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.updatePreviewList()
 
     # selects all files that have not yet been analysed (have no status)
     def selectAllUntaggedFiles(self):
+        self.inputFileListWidget.itemSelectionChanged.disconnect()
         self.inputFileListWidget.clearSelection()
         untagged_items = []
 
@@ -2235,7 +2241,7 @@ class PyMarAiGuiApp(QMainWindow):
         # Set the selection for all identified unanalysed items
         for item in untagged_items:
             item.setSelected(True)
-
+        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
 
     ####################################################
     # handle the event of Run Prediction button pressing
