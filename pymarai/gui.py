@@ -149,6 +149,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileListWidget.itemClicked.connect(self.refresh_mask)
         self.inputFileListWidget.itemDoubleClicked.connect(self.openAllSelectedFilesInRover)
 
         inputFileSectionWidget = QWidget()
@@ -2490,7 +2491,6 @@ class PyMarAiGuiApp(QMainWindow):
                 return
 
             correction_dir = os.path.join(self.hiddenOutputDir, "corrections")
-            self.update_progress_text_signal.emit(f"[DEBUG] correction_dir = '{correction_dir}'\n")
             if not os.path.isdir(correction_dir):
                 self.update_progress_text_signal.emit(f"[INFO] No corrections dir at {correction_dir}\n")
                 return
