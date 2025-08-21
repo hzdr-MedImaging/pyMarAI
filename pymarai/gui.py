@@ -2492,7 +2492,6 @@ class PyMarAiGuiApp(QMainWindow):
 
             correction_dir = os.path.join(self.hiddenOutputDir, "corrections")
             if not os.path.isdir(correction_dir):
-                self.update_progress_text_signal.emit(f"[INFO] No corrections dir at {correction_dir}\n")
                 return
 
             # base name without extension (from input .tif file)
