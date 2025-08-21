@@ -137,11 +137,13 @@ class PyMarAiGuiApp(QMainWindow):
         self.inputDirButton = self.createButton("Change Folder", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
+        self.fileCountLabel = self.createLabel("No files loaded")
 
         inputFilePathButtonsLayout = QHBoxLayout()
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
+        inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
         inputFilePathButtonsLayout.addStretch()
 
         self.inputFileListWidget = QListWidget()
@@ -691,6 +693,19 @@ class PyMarAiGuiApp(QMainWindow):
         else:
             self.inputFileLabel.setText("Input folder: None selected")
 
+    # updates the file count label to show how many files in directory (and how many of them are selected)
+    def updateFileCountLabel(self):
+        total_files = self.inputFileListWidget.count()
+        selected_files = len(self.inputFileListWidget.selectedItems())
+
+        if total_files > 0:
+            if selected_files == 0:
+                self.fileCountLabel.setText(f"{total_files} files")
+            else:
+                self.fileCountLabel.setText(f"{selected_files}/{total_files} files")
+        else:
+            self.fileCountLabel.setText("No files loaded")
+
     # updates the mask style based on checkbox selection
     def setMaskStyle(self, tab_type):
         show_gradient = getattr(self, f"{tab_type}_gradient_checkbox").isChecked()
@@ -899,6 +914,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.update_progress_text_signal.emit(
             f"Found {len(file_list)} compatible prediction files.\n"
         )
+        self.updateFileCountLabel()
 
     # callback when re-training files are loaded by the worker
     def onRetrainFilesLoaded(self, file_list, dir_path):
@@ -946,6 +962,7 @@ class PyMarAiGuiApp(QMainWindow):
     # updates the prediction preview list based on selected items
     def updatePreviewList(self):
         items = self.inputFileListWidget.selectedItems()
+        self.updateFileCountLabel()
         self.originalPredictionImage = None
         self.imagePreviewLabel.clear()
         self.imagePreviewLabel.setText("Image Preview")
