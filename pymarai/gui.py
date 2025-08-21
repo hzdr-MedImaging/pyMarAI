@@ -143,8 +143,8 @@ class PyMarAiGuiApp(QMainWindow):
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
-        inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
         inputFilePathButtonsLayout.addStretch()
+        inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
 
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
