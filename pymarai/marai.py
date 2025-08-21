@@ -195,7 +195,7 @@ class MarAiBase(ABC):
 
         # --- Cleanup output_dir stuff from previous runs before storing new stuff
         for filename_base in original_input_files_map:
-            filename_base = f"{filename_base}_m{microscope_number}"
+            filename_base = f"{filename_base}_m"
             for filename in os.listdir(output_dir):
                 if filename.startswith(filename_base):
                     os.remove(os.path.join(output_dir, filename))
