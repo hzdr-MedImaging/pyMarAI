@@ -2301,7 +2301,7 @@ class PyMarAiGuiApp(QMainWindow):
                 self.progressPlainTextEdit.clear()
 
                 # build the prediction job parameters
-                prediction_params = self.getPredictionParams()
+                prediction_params = self.getPredictionParams(selected_filenames)
                 if prediction_params is None:
                     return
 
@@ -2334,32 +2334,14 @@ class PyMarAiGuiApp(QMainWindow):
     # start the prediction by passing these parameters
     # to runPrediction.py main function (now getPredictionParams)
 
-    def getPredictionParams(self):
-        # collect input files
-        selected_items = self.inputFileListWidget.selectedItems()
-        if not selected_items:
-            self.update_progress_text_signal.emit("[ERROR] No input files selected.\n")
-            QMessageBox.warning(self, "Input Error", "Please select input files.")
+    def getPredictionParams(self, selected_filenames):
+        if not selected_filenames:
+            self.update_progress_text_signal.emit("[ERROR] No input files to process.\n")
             return None
-
-        # Filter out files that have already been analyzed
-        unprocessed_items = [item for item in selected_items if "[TO DO]" not in item.text()]
-        processed_items = [item for item in selected_items if "[TO DO]" in item.text()]
-
-        if not unprocessed_items:
-            self.update_progress_text_signal.emit(
-                "[INFO] All selected files are already analyzed. No new predictions will be run.\n")
-            QMessageBox.information(self, "Prediction Info", "All selected files are already analyzed.")
-            return None
-
-        if processed_items:
-            processed_filenames = [self.cleanFilename(item.text()) for item in processed_items]
-            self.update_progress_text_signal.emit(
-                f"[INFO] Skipping the following already analyzed files: {', '.join(processed_filenames)}\n")
 
         input_files = [
-            os.path.join(self.selectedInputDirectory, self.cleanFilename(item.text()))
-            for item in unprocessed_items
+            os.path.join(self.selectedInputDirectory, filename)
+            for filename in selected_filenames
         ]
 
         # output directory
