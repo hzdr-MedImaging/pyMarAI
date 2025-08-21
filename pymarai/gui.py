@@ -100,7 +100,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        self.tab_widget.addTab(self.retrain_tab, "Re-training")
+        #self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.tab_widget.currentChanged.connect(self.onTabChanged)
 
@@ -2143,7 +2143,6 @@ class PyMarAiGuiApp(QMainWindow):
                 f"[ERROR] No output mask files found to mark for {self.current_preview_filename}\n")
         else:
             self.file_status[self.current_preview_filename] = "BAD"
-
             self.updateOutputBasenames()
             self.updateFileStatusInList(self.current_preview_filename, "BAD")
             self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as BAD for {base_input}.\n")
@@ -2188,6 +2187,8 @@ class PyMarAiGuiApp(QMainWindow):
                     item.setText(original_filename)
                     item.setForeground(Qt.black)
                 break
+
+        self.markAnalyzedFiles()
 
     # select all files marked as GOOD in the list
     def selectAllGoodFiles(self):
@@ -2562,6 +2563,7 @@ class PyMarAiGuiApp(QMainWindow):
 
             # refresh mask visualization for current preview
             self.updatePreviewLabel()
+            self.markAnalyzedFiles()
             self.update_progress_text_signal.emit("[INFO] Mask visualization refreshed.\n")
 
         except Exception as e:
@@ -2912,7 +2914,7 @@ class FileStatusWorker(QThread):
             if status_found:
                 text = f"{os.path.basename(full_path)} [{status_found}]"
                 if mod_count > 1:
-                    text += f" (modified {mod_count - 1} times)"
+                    text += f" ({mod_count - 1})"
 
                 if status_found == "GOOD":
                     color = QColor("green")
