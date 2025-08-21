@@ -706,6 +706,28 @@ class PyMarAiGuiApp(QMainWindow):
         else:
             self.fileCountLabel.setText("No files loaded")
 
+    # finds the corresponding analyzed output file and sets the microscopeComboBox
+    # based on the microscope number in the filename
+    def findAndSetMicroscopeFromAnalyzedFile(self, input_filename):
+        basename = os.path.splitext(input_filename)[0]
+
+        if os.path.isdir(self.hiddenOutputDir):
+            for filename in os.listdir(self.hiddenOutputDir):
+                if basename in filename and filename.endswith('.v') and '_cnn' not in filename:
+
+                    pattern = re.compile(r"_m(\d+)")
+                    match = pattern.search(filename)
+
+                    if match:
+                        microscope_number = match.group(1)
+
+                        for i in range(self.microscopeComboBox.count()):
+                            item_text = self.microscopeComboBox.itemText(i)
+
+                            if f"{microscope_number}:" in item_text:
+                                self.microscopeComboBox.setCurrentIndex(i)
+                                return
+
     # updates the mask style based on checkbox selection
     def setMaskStyle(self, tab_type):
         show_gradient = getattr(self, f"{tab_type}_gradient_checkbox").isChecked()
@@ -976,6 +998,17 @@ class PyMarAiGuiApp(QMainWindow):
             # get the full path and filename of the first selected item for preview
             full_path = self.previewList[0]
             self.current_preview_filename = full_path
+
+            # check if analyzed
+            status = self.file_status.get(full_path)
+            is_analyzed = status in ("TO DO", "GOOD", "BAD")
+
+            if is_analyzed:
+                # select microscope if file was analysed before
+                self.findAndSetMicroscopeFromAnalyzedFile(os.path.basename(full_path))
+            else:
+                # set the microscope to the default option if the file is not analyzed
+                self.microscopeComboBox.setCurrentIndex(0)
 
             # show the first image in the selection
             self.showImageAtIndex(self.previewIndex)
