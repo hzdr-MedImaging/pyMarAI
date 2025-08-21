@@ -101,7 +101,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        #self.tab_widget.addTab(self.retrain_tab, "Re-training")
+        self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.tab_widget.currentChanged.connect(self.onTabChanged)
 
@@ -339,35 +339,33 @@ class PyMarAiGuiApp(QMainWindow):
         retrainInputFilePathButtonsLayout.addStretch()
 
         self.retrainInputFileListWidget = QListWidget()
-        self.retrainInputFileListWidget.setFixedHeight(600)
         self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
         self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
 
-        retrainInputFileSectionLayout = QVBoxLayout()
+        retrainInputFileSectionWidget = QWidget()
+        retrainInputFileSectionLayout = QVBoxLayout(retrainInputFileSectionWidget)
         retrainInputFileSectionLayout.addWidget(retrainInputFileLabel)
         retrainInputFileSectionLayout.addWidget(self.retrainInputFileListWidget)
         retrainInputFileSectionLayout.addLayout(retrainInputFilePathButtonsLayout)
 
-        retrainInputFileSectionWidget = QWidget()
-        retrainInputFileSectionWidget.setLayout(retrainInputFileSectionLayout)
-
         # --- Image Preview Section ---
-        self.retrainImagePreviewLabel = self.createLabel("Image Preview")
-        #self.retrainImagePreviewLabel.setFixedHeight(600)
-        #self.retrainImagePreviewLabel.setMinimumWidth(800)
+        self.retrainImagePreviewLabel = ScaledLabel("Image Preview")
         self.retrainImagePreviewLabel.setAlignment(Qt.AlignCenter)
         self.retrainImagePreviewLabel.setStyleSheet("""
             border: 1px solid #cccccc;
             background-color: #fafafa;
             border-radius: 6px;
         """)
+        self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.retrainImageFilenameLabel = self.createLabel("No file selected")
         self.retrainImageFilenameLabel.setAlignment(Qt.AlignCenter)
+        self.retrainImageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.retrainImageFilenameLabel.setMaximumHeight(16)
 
-        self.retrainPrevButton = self.createButton("Previous", self.showPreviousRetrainImage)
-        self.retrainNextButton = self.createButton("Next", self.showNextRetrainImage)
+        self.retrainPrevButton = self.createButton("↑ Previous", self.showPreviousRetrainImage)
+        self.retrainNextButton = self.createButton("Next ↓", self.showNextRetrainImage)
 
         retrainPrevNextButtonsLayout = QHBoxLayout()
         retrainPrevNextButtonsLayout.addStretch()
@@ -375,15 +373,16 @@ class PyMarAiGuiApp(QMainWindow):
         retrainPrevNextButtonsLayout.addWidget(self.retrainNextButton)
         retrainPrevNextButtonsLayout.addStretch()
 
-        retrainImagePreviewLayout = QVBoxLayout()
-        retrainImagePreviewLayout.addWidget(self.retrainImageFilenameLabel)
-        retrainImagePreviewLayout.addWidget(self.retrainImagePreviewLabel)
-        retrainImagePreviewLayout.addLayout(retrainPrevNextButtonsLayout)
+        retrainImagePreviewSubLayout = QVBoxLayout()
+        retrainImagePreviewSubLayout.addWidget(self.retrainImageFilenameLabel)
+        retrainImagePreviewSubLayout.addWidget(self.retrainImagePreviewLabel)
+        retrainImagePreviewSubLayout.addLayout(retrainPrevNextButtonsLayout)
 
-        retrainImagePreviewWidget = QWidget()
-        retrainImagePreviewWidget.setLayout(retrainImagePreviewLayout)
+        retrainImagePreviewSubWidget = QWidget()
+        retrainImagePreviewSubWidget.setLayout(retrainImagePreviewSubLayout)
+        retrainImagePreviewSubWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # --- Mask Buttons + Placeholder for Display Options ---
+        # --- Mask + Zoom Controls ---
         self.retrainApplyMaskButton = self.createButton("Apply Mask", self.applyRetrainMask)
         self.retrainRemoveMaskButton = self.createButton("Remove Mask", self.removeRetrainMask)
 
@@ -392,30 +391,41 @@ class PyMarAiGuiApp(QMainWindow):
         retrainMaskButtonsLayout.addWidget(self.retrainRemoveMaskButton)
         retrainMaskButtonsLayout.addStretch()
 
+        mask_options_group_box = self.setupMaskDisplayOptions("retrain")
+
+        self.retrainZoomPercentLabel = QLabel("100%")
+        self.retrainZoomPercentLabel.setAlignment(Qt.AlignCenter)
+        self.retrainZoomInButton = self.createButton("+", self.retrainImagePreviewLabel.zoomIn)
+        self.retrainZoomOutButton = self.createButton("-", self.retrainImagePreviewLabel.zoomOut)
+
+        retrainZoomButtonsLayout = QHBoxLayout()
+        retrainZoomButtonsLayout.addWidget(self.retrainZoomOutButton)
+        retrainZoomButtonsLayout.addWidget(self.retrainZoomInButton)
+
+        retrainZoomMainLayout = QVBoxLayout()
+        retrainZoomMainLayout.addWidget(self.retrainZoomPercentLabel)
+        retrainZoomMainLayout.addLayout(retrainZoomButtonsLayout)
+
+        retrainZoomGroupBox = QGroupBox("Image Zoom:")
+        retrainZoomGroupBox.setLayout(retrainZoomMainLayout)
+
         retrainMaskControlsLayout = QVBoxLayout()
         retrainMaskControlsLayout.addSpacing(21)
         retrainMaskControlsLayout.addLayout(retrainMaskButtonsLayout)
-
-        mask_options_group_box = self.setupMaskDisplayOptions("retrain")
-
         retrainMaskControlsLayout.addWidget(mask_options_group_box)
+        retrainMaskControlsLayout.addWidget(retrainZoomGroupBox)
+        retrainMaskControlsLayout.addStretch()
+
         retrainMaskControlsWidget = QWidget()
         retrainMaskControlsWidget.setLayout(retrainMaskControlsLayout)
+        retrainMaskControlsWidget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
-        # --- Output Folder Section ---
-        self.retrainOutputFileLabel = self.createLabel("Output folder:")
-        self.retrainOutputFilePathTextEdit = self.createTextEdit()
-        self.retrainOutputFilePathSelectButton = self.createButton("Browse", self.retrainOutputDirSelect)
+        retrainImagePreviewWidget = QWidget()
+        retrainImagePreviewLayout = QHBoxLayout(retrainImagePreviewWidget)
+        retrainImagePreviewLayout.addWidget(retrainImagePreviewSubWidget)
+        retrainImagePreviewLayout.addWidget(retrainMaskControlsWidget)
 
-        retrainOutputLayout = QHBoxLayout()
-        retrainOutputLayout.addWidget(self.retrainOutputFileLabel)
-        retrainOutputLayout.addWidget(self.retrainOutputFilePathTextEdit)
-        retrainOutputLayout.addWidget(self.retrainOutputFilePathSelectButton)
-
-        retrainOutputWidget = QWidget()
-        retrainOutputWidget.setLayout(retrainOutputLayout)
-
-        # --- Re-training Run Button + Progress Bar ---
+        # --- Run Button + Progress Bar ---
         self.retrainButton = self.createButton("Run Re-training", self.retrainButtonPressed)
         self.retrainButton.setFixedSize(140, 36)
 
@@ -428,7 +438,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrainProgressBar.hide()
 
         retrainRunLayout = QHBoxLayout()
-        retrainRunLayout.addWidget(self.retrainButton)
+        retrainRunLayout.addWidget(self.retrainButton, alignment=Qt.AlignCenter)
         retrainRunLayout.addWidget(self.retrainProgressBarLabel)
         retrainRunLayout.addWidget(self.retrainProgressBar)
         retrainRunLayout.addStretch()
@@ -436,33 +446,33 @@ class PyMarAiGuiApp(QMainWindow):
         retrainRunWidget = QWidget()
         retrainRunWidget.setLayout(retrainRunLayout)
 
-        # --- Progress Log Section ---
+        # --- Progress Log ---
         retrainProgressLabel = self.createLabel("Progress Output:")
         self.retrainProgressPlainTextEdit = self.createPlainTextEdit()
 
-        retrainLogLayout = QVBoxLayout()
+        retrainLogWidget = QWidget()
+        retrainLogLayout = QVBoxLayout(retrainLogWidget)
         retrainLogLayout.addWidget(retrainProgressLabel)
         retrainLogLayout.addWidget(self.retrainProgressPlainTextEdit)
 
-        retrainLogWidget = QWidget()
-        retrainLogWidget.setLayout(retrainLogLayout)
+        # --- Splitters ---
+        self.retrainTopSplitterWidget = QSplitter(Qt.Orientation.Horizontal)
+        self.retrainTopSplitterWidget.addWidget(retrainInputFileSectionWidget)
+        self.retrainTopSplitterWidget.addWidget(retrainImagePreviewWidget)
 
-        # --- Final Tab Layout ---
-        layout = QGridLayout(self.retrain_tab)
+        retrainControlWidget = QWidget()
+        retrainControlLayout = QVBoxLayout(retrainControlWidget)
+        retrainControlLayout.addWidget(retrainRunWidget)
+        retrainControlLayout.addWidget(retrainLogWidget)
 
-        row = 0
-        layout.addWidget(retrainInputFileSectionWidget, row, 0)
-        layout.addWidget(retrainImagePreviewWidget, row, 1, 1, 2)
-        layout.addWidget(retrainMaskControlsWidget, row, 3, Qt.AlignTop | Qt.AlignRight)
+        self.retrainBottomSplitterWidget = QSplitter(Qt.Orientation.Vertical)
+        self.retrainBottomSplitterWidget.setStyleSheet('QSplitter::handle {border: 2px solid lightgrey; }')
+        self.retrainBottomSplitterWidget.addWidget(self.retrainTopSplitterWidget)
+        self.retrainBottomSplitterWidget.addWidget(retrainControlWidget)
 
-        row += 1
-        layout.addWidget(retrainOutputWidget, row, 0, 1, 3)
-
-        row += 1
-        layout.addWidget(retrainRunWidget, row, 0, 1, 2)
-
-        row += 1
-        layout.addWidget(retrainLogWidget, row, 0, 1, 4)
+        # --- Main Retrain Tab Layout ---
+        retrain_tab_layout = QVBoxLayout(self.retrain_tab)
+        retrain_tab_layout.addWidget(self.retrainBottomSplitterWidget)
 
     # creates and configures the QGroupBox for mask display options
     def setupMaskDisplayOptions(self, tab_type):
@@ -566,9 +576,6 @@ class PyMarAiGuiApp(QMainWindow):
     def initElements(self):
         self.enableWidgets(True)
 
-        if os.path.isdir(self.lastRetrainOutputDirectory):
-            self.retrainOutputFilePathTextEdit.insert(self.lastRetrainOutputDirectory)
-
         if os.path.isdir(self.selectedInputDirectory):
             self.loadFilesFromDirectory(self.selectedInputDirectory)
 
@@ -628,9 +635,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         # re-training tab widgets
         self.retrainInputFileListWidget.setEnabled(enable)
-        self.retrainOutputFilePathTextEdit.setEnabled(enable)
         self.retrainInputDirButton.setEnabled(enable)
-        self.retrainOutputFilePathSelectButton.setEnabled(enable)
         self.retrainSelectAllButton.setEnabled(enable)
         self.retrainDeselectAllButton.setEnabled(enable)
         self.retrainPrevButton.setEnabled(enable)
@@ -738,14 +743,6 @@ class PyMarAiGuiApp(QMainWindow):
                     self.applyPredictionMask()
                 else:
                     self.applyRetrainMask()
-
-    # opens a dialog to select the output directory for re-training
-    def retrainOutputDirSelect(self):
-        dir = QFileDialog.getExistingDirectory(self, 'Select a re-training output folder:')
-        if dir != "":
-            self.retrainOutputFilePathTextEdit.clear()
-            self.retrainOutputFilePathTextEdit.insert(dir)
-            self.settings.setValue("lastRetrainOutputDir", dir)
 
     # updates the set of basenames for analyzed files in the output directory
     def updateOutputBasenames(self):
@@ -1197,29 +1194,7 @@ class PyMarAiGuiApp(QMainWindow):
             if filename_base in self.retrainMaskedPixmaps:
                 pixmap = self.retrainMaskedPixmaps[filename_base]
 
-                # resize image height to 600px and calculate width proportionally
-                fixed_height = 600
-                aspect_ratio = pixmap.width() / pixmap.height()
-                new_width = int(fixed_height * aspect_ratio)
-
-                self.retrainImagePreviewLabel.setFixedSize(new_width, fixed_height)
-
-                scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-                # apply rounded corners
-                rounded_pixmap = QPixmap(scaled_pixmap.size())
-                rounded_pixmap.fill(Qt.transparent)
-
-                painter = QPainter(rounded_pixmap)
-                painter.setRenderHint(QPainter.Antialiasing)
-                path = QPainterPath()
-                radius = 8
-                path.addRoundedRect(0, 0, scaled_pixmap.width(), scaled_pixmap.height(), radius, radius)
-                painter.setClipPath(path)
-                painter.drawPixmap(0, 0, scaled_pixmap)
-                painter.end()
-
-                self.retrainImagePreviewLabel.setPixmap(rounded_pixmap)
+                self.retrainImagePreviewLabel.setPixmap(pixmap)
                 self.retrainImagePreviewLabel.setText("")
                 self.retrainApplyMaskButton.setEnabled(False)
                 self.retrainRemoveMaskButton.setEnabled(True)
@@ -1842,15 +1817,19 @@ class PyMarAiGuiApp(QMainWindow):
         files_copied = 0
         files_failed_to_copy = []
 
+        # regex pattern to identify timestamps
+        timestamp_pattern = re.compile(r'_\d{8}_\d{6}')
+
         # perform the copy operation for the analyzed files
         for file_info in analyzed_files_info:
             base_filename = file_info['base_filename']
 
             # find all matching files for the current base_filename,
-            # ignoring any files containing '_cnn' in their name
+            # ignoring any files containing '_cnn' or a timestamp
             matching_output_files = [
                 f for f in all_output_files
-                if f.startswith(base_filename) and (f.endswith('.v') or f.endswith('.rdf')) and '_cnn' not in f
+                if f.startswith(base_filename) and (f.endswith('.v') or f.endswith('.rdf'))
+                   and '_cnn' not in f and not timestamp_pattern.search(f)
             ]
 
             if not matching_output_files:
@@ -2879,27 +2858,42 @@ class FileStatusWorker(QThread):
         self.strip_microscope_tag_func = strip_microscope_tag_func
 
     def run(self):
-        status_map = {}
-        if os.path.isdir(self.output_dir):
-            for f in os.listdir(self.output_dir):
-                if not os.path.isfile(os.path.join(self.output_dir, f)):
-                    continue
-                base_no_ext = os.path.splitext(f)[0]
-                base, status = self.parse_status_func(base_no_ext)
-                if status:  # GOOD/BAD
-                    status_map[base] = status
-                else:
-                    status_map.setdefault(base, "TO DO")
-
         batch = []
+
+        # pre-list all output files once
+        output_files = os.listdir(self.output_dir) if os.path.isdir(self.output_dir) else []
+
         for row, item in enumerate(self.input_items):
             full_path = item.data(Qt.UserRole)
             base_name = os.path.splitext(os.path.basename(full_path))[0]
             base_name = self.strip_microscope_tag_func(base_name)
 
-            if base_name in status_map:
-                status_found = status_map[base_name]
+            # count rdf files that start with basename
+            mod_count = sum(
+                1 for f in output_files
+                if f.startswith(base_name) and f.endswith(".rdf")
+            )
+
+            # detect status as before
+            status_found = None
+            color = QColor("black")
+            text = os.path.basename(full_path)
+
+            for f in output_files:
+                if f.startswith(base_name):
+                    base_no_ext = os.path.splitext(f)[0]
+                    _, status = self.parse_status_func(base_no_ext)
+                    if status:
+                        status_found = status
+                        break
+                    else:
+                        status_found = "TO DO"
+
+            if status_found:
                 text = f"{os.path.basename(full_path)} [{status_found}]"
+                if mod_count > 1:
+                    text += f" (modified {mod_count - 1} times)"
+
                 if status_found == "GOOD":
                     color = QColor("green")
                 elif status_found == "BAD":
@@ -2908,10 +2902,6 @@ class FileStatusWorker(QThread):
                     color = QColor("orange")
                 else:
                     color = QColor("#A9A9A9")
-            else:
-                status_found = None
-                text = os.path.basename(full_path)
-                color = QColor("black")
 
             batch.append((row, text, color, status_found))
 
@@ -2924,6 +2914,7 @@ class FileStatusWorker(QThread):
             self.batch_ready.emit(batch)
 
         self.finished_all.emit()
+
 
 class ScaledLabel(QLabel):
     zoom_changed_signal = pyqtSignal(float)
