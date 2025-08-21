@@ -147,7 +147,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
-        self.inputFileListWidget.itemDoubleClicked.connect(self.openAnalyzedFile)
+        self.inputFileListWidget.itemDoubleClicked.connect(self.openAllSelectedFilesInRover)
 
         inputFileSectionWidget = QWidget()
         inputFileSectionLayout = QVBoxLayout(inputFileSectionWidget)
@@ -1727,17 +1727,6 @@ class PyMarAiGuiApp(QMainWindow):
         else:
             self.predictionButton.setText("Run Prediction")
             self.predictionButton.setEnabled(True)  # re-enable after prediction finishes or stops
-
-    def openAnalyzedFile(self, item):
-        text = item.text()
-        filename = self.cleanFilename(text)
-
-        if "[TO DO]" not in text:
-            self.update_progress_text_signal.emit(
-                f"[ERROR] '{filename}' is not marked as analyzed. Skipping open with ROVER.\n")
-            return
-
-        self.openMultipleFilesInRover([filename])
 
     def openMultipleFilesInRover(self, selected_filenames):
         output_dir = self.hiddenOutputDir
