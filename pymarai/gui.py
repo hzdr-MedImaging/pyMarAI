@@ -58,9 +58,8 @@ class PyMarAiGuiApp(QMainWindow):
         self.utils = config.get_utils()
 
         self.settings = QSettings()
-        self.selectedInputDirectory = self.settings.value("lastInputDir", os.getcwd())
-        self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", os.getcwd())
-        self.lastRetrainOutputDirectory = self.settings.value("lastRetrainOutputDir", os.getcwd())
+        self.selectedInputDirectory = self.settings.value("lastInputDir", "")
+        self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", "")
 
         self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, f".pymarai-{os.getlogin()}")
 
@@ -111,6 +110,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.setWindowTitle(f"pyMarAI v{__version__} – Spheroids Auto Delineation (hzdr.de)")
         self.initElements()
         self.setCentralWidget(self.tab_widget)
+        self.updateInputDirectoryLabel(self.selectedInputDirectory)
 
         # Initial window size/pos last saved.
         self.restoreGeometry(self.settings.value("geometry", QByteArray()))
@@ -133,7 +133,7 @@ class PyMarAiGuiApp(QMainWindow):
     # sets up the layout and widgets for the prediction tab
     def setupPredictionTab(self):
         # --- Input File Section ---
-        inputFileLabel = self.createLabel("Input folder:")
+        self.inputFileLabel = self.createLabel("Input folder:")
         self.inputDirButton = self.createButton("Change Folder", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
@@ -151,7 +151,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         inputFileSectionWidget = QWidget()
         inputFileSectionLayout = QVBoxLayout(inputFileSectionWidget)
-        inputFileSectionLayout.addWidget(inputFileLabel)
+        inputFileSectionLayout.addWidget(self.inputFileLabel)
         inputFileSectionLayout.addWidget(self.inputFileListWidget)
         inputFileSectionLayout.addLayout(inputFilePathButtonsLayout)
 
@@ -576,8 +576,14 @@ class PyMarAiGuiApp(QMainWindow):
     def initElements(self):
         self.enableWidgets(True)
 
+        if not self.selectedInputDirectory or not os.path.isdir(self.selectedInputDirectory):
+            self.loadInputDirectory()
+
         if os.path.isdir(self.selectedInputDirectory):
             self.loadFilesFromDirectory(self.selectedInputDirectory)
+
+        if not self.selectedRetrainInputDirectory or not os.path.isdir(self.selectedRetrainInputDirectory):
+            self.loadInputDirectory()
 
         if os.path.isdir(self.selectedRetrainInputDirectory):
             self.loadRetrainFilesFromDirectory(self.selectedRetrainInputDirectory)
@@ -677,6 +683,19 @@ class PyMarAiGuiApp(QMainWindow):
         lineEdit = QLineEdit()
         lineEdit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         return lineEdit
+
+    # updates the input directory label to show only the last part of the path
+    def updateInputDirectoryLabel(self, dir_path):
+        if dir_path and os.path.isdir(dir_path):
+            # split the path into components and get the last 3
+            path_parts = dir_path.split(os.sep)
+            display_parts = path_parts[-3:]
+
+            # join the parts back together with the separator
+            display_path = os.sep.join(display_parts)
+            self.inputFileLabel.setText(f"Input folder: ...{os.sep}{display_path}")
+        else:
+            self.inputFileLabel.setText("Input folder: None selected")
 
     # updates the mask style based on checkbox selection
     def setMaskStyle(self, tab_type):
@@ -807,6 +826,7 @@ class PyMarAiGuiApp(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Prediction Input Folder")
         if dir_path:
             self.settings.setValue("lastInputDir", dir_path)
+            self.updateInputDirectoryLabel(dir_path)
             self.loadFilesFromDirectory(dir_path)
             self.hiddenOutputDir = os.path.join(dir_path, f".pymarai-{os.getlogin()}")
             self.updatePreviewList()
