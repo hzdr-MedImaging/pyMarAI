@@ -699,10 +699,7 @@ class PyMarAiGuiApp(QMainWindow):
         selected_files = len(self.inputFileListWidget.selectedItems())
 
         if total_files > 0:
-            if selected_files == 0:
-                self.fileCountLabel.setText(f"{total_files} images")
-            else:
-                self.fileCountLabel.setText(f"{selected_files}/{total_files} images")
+            self.fileCountLabel.setText(f"{selected_files}/{total_files} images")
         else:
             self.fileCountLabel.setText("No images loaded")
 
