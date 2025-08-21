@@ -1049,70 +1049,41 @@ class PyMarAiGuiApp(QMainWindow):
 
     # creates a gradient mask overlay using a specified colormap
     def create_gradient_mask_overlay(self, original_image_pil, mask_pil, colormap_name="jet", alpha=150):
-        # get the colormap
+        # get colormap
         try:
             cmap = plt.get_cmap(colormap_name)
         except ValueError:
-            logger.warning(f"Colormap '{colormap_name}' not found. Falling back to 'jet'.")
-            cmap = plt.get_cmap('jet')
+            cmap = plt.get_cmap("jet")
 
-        # convert PIL images to NumPy arrays
-        original_image_np = np.array(original_image_pil.convert('RGB'))
-        mask_np = np.array(mask_pil.convert('L'))
+        # convert to numpy
+        original_image = np.array(original_image_pil.convert("RGB"))
+        mask = np.array(mask_pil.convert("L"))
 
-        # calculate brightness from the original image (average of R, G, B channels)
-        brightness = original_image_np.astype(np.float32).mean(axis=2)
+        # brightness (grayscale mean)
+        brightness = original_image.mean(axis=2).astype(np.float32)
 
-        # get brightness values only for pixels under the mask
-        masked_brightness_values = brightness[mask_np > 0]
-
-        if masked_brightness_values.size > 0:
-            min_masked_brightness = masked_brightness_values.min()
-            max_masked_brightness = masked_brightness_values.max()
-
-            if max_masked_brightness > min_masked_brightness:
-                # normalize brightness based on the min/max of ONLY the masked pixels
-                norm_brightness = (brightness - min_masked_brightness) / (max_masked_brightness - min_masked_brightness)
-                norm_brightness = np.clip(norm_brightness, 0, 1)
+        # mask brightness only
+        masked_values = brightness[mask > 0]
+        if masked_values.size > 0:
+            min_b, max_b = masked_values.min(), masked_values.max()
+            if max_b > min_b:
+                norm_brightness = (brightness - min_b) / (max_b - min_b)
             else:
-                # if all masked pixels have the same brightness, map them to the middle of the colormap
                 norm_brightness = np.full_like(brightness, 0.5)
         else:
-            # if no mask pixels are active (or mask is empty), provide a default norm_brightness
             norm_brightness = np.full_like(brightness, 0.5)
 
-        # apply the colormap to the normalized brightness values
-        colored_mask = cmap(norm_brightness)[:, :, :3] * 255
-        colored_mask = colored_mask.astype(np.uint8)
+        # apply colormap
+        colored = (cmap(norm_brightness)[:, :, :3] * 255).astype(np.uint8)
 
-        # create an alpha channel for the overlay
-        overlay_alpha = np.where(mask_np > 0, alpha, 0).astype(np.uint8)
-        overlay_alpha = np.expand_dims(overlay_alpha, axis=2)
+        # create overlay with transparency
+        overlay = np.zeros_like(original_image, dtype=np.uint8)
+        overlay[mask > 0] = colored[mask > 0]
 
-        # combine the colored mask with its alpha channel
-        overlay_rgba = np.concatenate((colored_mask, overlay_alpha), axis=2)
+        # alpha blending
+        blended = cv2.addWeighted(original_image, 1.0, overlay, alpha / 255.0, 0)
 
-        # convert original image to RGBA for alpha compositing
-        original_image_rgba_np = np.array(original_image_pil.convert('RGBA'))
-
-        # perform alpha compositing using NumPy
-        # convert to float for calculation
-        alpha_orig = original_image_rgba_np[:, :, 3] / 255.0
-        alpha_overlay = overlay_rgba[:, :, 3] / 255.0
-
-        # create output alpha channel
-        out_alpha = alpha_overlay + alpha_orig * (1 - alpha_overlay)
-        out_alpha = np.clip(out_alpha, 0, 1)
-
-        # create output RGB channels
-        out_rgb = (overlay_rgba[:, :, :3].astype(np.float32) * alpha_overlay[:, :, np.newaxis] +
-                   original_image_rgba_np[:, :, :3].astype(np.float32) * alpha_orig[:, :, np.newaxis] * (1 - alpha_overlay[:, :, np.newaxis])) / (out_alpha[:, :, np.newaxis] + 1e-8) # Add small epsilon to prevent division by zero
-
-        # convert back to uint8 and combine for final image
-        combined_image_np = np.concatenate((out_rgb, (out_alpha * 255)[:, :, np.newaxis]), axis=2).astype(np.uint8)
-
-        # convert NumPy array back to PIL Image
-        return Image.fromarray(combined_image_np, 'RGBA')
+        return Image.fromarray(blended, mode="RGB")
 
     # creates an overlay with only the contours of the mask
     def create_contour_mask_overlay(self, original_image_pil, mask_pil, contour_color: QColor, thickness=2):
