@@ -576,14 +576,8 @@ class PyMarAiGuiApp(QMainWindow):
     def initElements(self):
         self.enableWidgets(True)
 
-        if not self.selectedInputDirectory or not os.path.isdir(self.selectedInputDirectory):
-            self.loadInputDirectory()
-
         if os.path.isdir(self.selectedInputDirectory):
             self.loadFilesFromDirectory(self.selectedInputDirectory)
-
-        if not self.selectedRetrainInputDirectory or not os.path.isdir(self.selectedRetrainInputDirectory):
-            self.loadInputDirectory()
 
         if os.path.isdir(self.selectedRetrainInputDirectory):
             self.loadRetrainFilesFromDirectory(self.selectedRetrainInputDirectory)
