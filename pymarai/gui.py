@@ -137,14 +137,14 @@ class PyMarAiGuiApp(QMainWindow):
         self.inputDirButton = self.createButton("Change Folder", self.loadInputDirectory)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
-        self.fileCountLabel = self.createLabel("No files loaded")
+        self.fileCountLabel = self.createLabel("No images loaded")
 
         inputFilePathButtonsLayout = QHBoxLayout()
         inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
-        inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
         inputFilePathButtonsLayout.addStretch()
+        inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
 
         self.inputFileListWidget = QListWidget()
         self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -170,7 +170,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.imageFilenameLabel = self.createLabel("No file selected")
         self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum);
         self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
-        self.imageFilenameLabel.setMaximumHeight(16)
+        self.imageFilenameLabel.setMaximumHeight(18)
 
         self.prevButton = self.createButton("↑ Previous", self.showPreviousImage)
         self.nextButton = self.createButton("Next ↓", self.showNextImage)
@@ -238,13 +238,13 @@ class PyMarAiGuiApp(QMainWindow):
         #self.selectAllUntaggedButton = self.createButton("Select All Untagged", self.selectAllUntaggedFiles)
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
         self.openRoverButton.setToolTip(
-            "Opens all currently selected files in the ROVER application. It can also be triggered by double-clicking the file of interest.")
+            "Opens all currently selected images in the ROVER application. It can also be triggered by double-clicking the file of interest.")
         self.saveOutputButton = self.createButton("Export Images", self.saveSelectedOutputs)
         self.saveOutputButton.setToolTip(
             "Saves the selected output files (.v and .rdf) to the user-selected directory.")
         self.generateStatsButton = self.createButton("Generate CSV", self.generateStatisticsTable)
         self.generateStatsButton.setToolTip(
-            "Generates a statistics table for all selected files that are marked as 'GOOD'.")
+            "Generates a statistics table for all selected images that are marked as 'GOOD'.")
 
         statusToolsWidget = QWidget()
         statusToolsLayout = QHBoxLayout(statusToolsWidget)
@@ -700,11 +700,11 @@ class PyMarAiGuiApp(QMainWindow):
 
         if total_files > 0:
             if selected_files == 0:
-                self.fileCountLabel.setText(f"{total_files} files")
+                self.fileCountLabel.setText(f"{total_files} images")
             else:
-                self.fileCountLabel.setText(f"{selected_files}/{total_files} files")
+                self.fileCountLabel.setText(f"{selected_files}/{total_files} images")
         else:
-            self.fileCountLabel.setText("No files loaded")
+            self.fileCountLabel.setText("No images loaded")
 
     # finds the corresponding analyzed output file and sets the microscopeComboBox
     # based on the microscope number in the filename
@@ -873,9 +873,9 @@ class PyMarAiGuiApp(QMainWindow):
     # loads image files from a specified directory for prediction
     def loadFilesFromDirectory(self, dir_path):
         self.update_progress_text_signal.emit(
-            f"Scanning directory for prediction files: {dir_path}.\n")
+            f"Scanning directory for tif or png images: {dir_path}.\n")
         self.inputFileListWidget.clear()
-        self.setProgressBarText("Loading files...")
+        self.setProgressBarText("Loading images...")
         self.previewList = []
 
         self.file_status = {}
@@ -892,7 +892,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # loads .v and .rdf files from a specified directory for re-training
     def loadRetrainFilesFromDirectory(self, dir_path):
-        self.update_retrain_progress_text_signal.emit(f"Scanning directory for re-training files: {dir_path}.\n")
+        self.update_retrain_progress_text_signal.emit(f"Scanning directory for v or rdf files: {dir_path}.\n")
         self.retrainInputFileListWidget.clear()
         self.retrainPreviewList = []
 
@@ -930,11 +930,11 @@ class PyMarAiGuiApp(QMainWindow):
             self.imageFilenameLabel.setText("No file selected")
         else:
             self.imagePreviewLabel.clear()
-            self.imagePreviewLabel.setText("No image files found")
+            self.imagePreviewLabel.setText("No images found")
             self.imageFilenameLabel.setText("")
 
         self.update_progress_text_signal.emit(
-            f"Found {len(file_list)} compatible prediction files.\n"
+            f"Found {len(file_list)} compatible images.\n"
         )
         self.updateFileCountLabel()
 
@@ -953,7 +953,7 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainPreviewIndex = 0
             self.retrainImagePreviewLabel.clear()
             self.retrainImagePreviewLabel.setText("Image Preview")
-            self.retrainImageFilenameLabel.setText("No file selected")
+            self.retrainImageFilenameLabel.setText("No image selected")
         else:
             self.retrainImagePreviewLabel.clear()
             self.retrainImagePreviewLabel.setText("No .v or .rdf files found")
@@ -963,7 +963,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # callback for file loading errors
     def onFileLoadError(self, error_message):
-        self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction files: {error_message.strip()}\n")
+        self.update_progress_text_signal.emit(f"[ERROR] Error loading prediction images: {error_message.strip()}\n")
         self.imagePreviewLabel.setText("Failed to load images")
 
     # callback when prediction file loading is finished
@@ -1167,7 +1167,7 @@ class PyMarAiGuiApp(QMainWindow):
     # displays the image at the given index in the prediction preview
     def showImageAtIndex(self, index):
         if not self.previewList:
-            self.imagePreviewLabel.setText("No files selected")
+            self.imagePreviewLabel.setText("No images selected")
             return
 
         full_input_path = self.previewList[index]
@@ -1239,7 +1239,7 @@ class PyMarAiGuiApp(QMainWindow):
     # displays the image at the given index in the re-training preview
     def showRetrainImageAtIndex(self, index):
         if not self.retrainPreviewList:
-            self.retrainImagePreviewLabel.setText("No files selected")
+            self.retrainImagePreviewLabel.setText("No images selected")
             return
 
         filename_with_ext = self.cleanFilename(self.retrainPreviewList[index])
@@ -1675,7 +1675,7 @@ class PyMarAiGuiApp(QMainWindow):
     def openAllSelectedFilesInRover(self):
         selected_items = self.inputFileListWidget.selectedItems()
         if not selected_items:
-            self.update_progress_text_signal.emit("[ERROR] No files selected to open in ROVER.\n")
+            self.update_progress_text_signal.emit("[ERROR] No images selected to open in ROVER.\n")
             return
 
         analyzed_filenames = []
@@ -1688,7 +1688,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         if not analyzed_filenames:
             self.update_progress_text_signal.emit(
-                "[ERROR] None of the selected files are marked as analyzed. Skipping.\n")
+                "[ERROR] None of the selected images are marked as analyzed. Skipping.\n")
             return
 
         # Now, call the function to open the files
@@ -1842,13 +1842,13 @@ class PyMarAiGuiApp(QMainWindow):
             self.update_progress_text_signal.emit(f"[ERROR] Failed to open ROVER: {e}\n")
             QMessageBox.warning(
                 self, "Error Opening ROVER",
-                f"Could not open ROVER for selected files: {e}\nPlease ensure ROVER is installed and in your system PATH."
+                f"Could not open ROVER for selected images: {e}\nPlease ensure ROVER is installed and in your system PATH."
             )
 
     def saveSelectedOutputs(self):
         selected_items = self.inputFileListWidget.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "No files selected", "Please select one or more files to save.")
+            QMessageBox.warning(self, "No images selected", "Please select one or more images to save.")
             return
 
         # check for analyzed files before opening the save dialog
@@ -1868,7 +1868,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         if not analyzed_files_info:
             if files_not_analyzed:
-                QMessageBox.information(self, "No Files to Save", "None of the selected files have been analyzed yet.")
+                QMessageBox.information(self, "No images to save", "None of the selected images have been analyzed yet.")
             return
 
         destination_dir = QFileDialog.getExistingDirectory(self, "Select Destination Directory", os.getcwd())
@@ -1917,12 +1917,12 @@ class PyMarAiGuiApp(QMainWindow):
         # display summary messages
         final_message = []
         if files_copied > 0:
-            final_message.append(f"Successfully copied {files_copied} output files to:\n{destination_dir}")
+            final_message.append(f"Successfully copied {files_copied} output files (images + rdf) to:\n{destination_dir}")
         if files_not_analyzed:
-            final_message.append("Skipped the following files as they have not been analyzed:")
+            final_message.append("Skipped the following images as they have not been analyzed:")
             final_message.extend([f"• {f}" for f in files_not_analyzed])
         if files_failed_to_copy:
-            final_message.append("Failed to copy the following files due to errors:")
+            final_message.append("Failed to copy the following images due to errors:")
             final_message.extend([f"• {f}" for f in files_failed_to_copy])
 
         if final_message:
@@ -1932,7 +1932,7 @@ class PyMarAiGuiApp(QMainWindow):
     def generateStatisticsTable(self):
         selected_items = self.inputFileListWidget.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "No files selected", "Please select one or more files to save.")
+            QMessageBox.warning(self, "No images selected", "Please select one or more images to generate statistics for.")
             return
 
         good_files = []
@@ -2002,7 +2002,7 @@ class PyMarAiGuiApp(QMainWindow):
         if table_data:
             self.showStatisticsDialog(table_header, table_data)
         else:
-            QMessageBox.information(self, "No Statistics", "No statistics could be generated for the selected files.")
+            QMessageBox.information(self, "No Statistics", "No statistics could be generated for the selected images.")
 
     # displays the collected statistics and provides an option to save as a CSV
     def showStatisticsDialog(self, header, data):
@@ -2284,7 +2284,7 @@ class PyMarAiGuiApp(QMainWindow):
             # check for already-analyzed files first
             selected_items = self.inputFileListWidget.selectedItems()
             if not selected_items:
-                self.update_progress_text_signal.emit("No files selected.\n")
+                self.update_progress_text_signal.emit("No images selected.\n")
                 return
 
             selected_filenames = [self.cleanFilename(item.text()) for item in selected_items]
@@ -2301,7 +2301,7 @@ class PyMarAiGuiApp(QMainWindow):
                 msg = QMessageBox()
                 msg.setIcon(QMessageBox.Question)
                 msg.setWindowTitle("Re-analyze Already Processed Files?")
-                msg.setText(f"{len(already_analyzed)} of the selected files have already been analyzed.\n\n"
+                msg.setText(f"{len(already_analyzed)} of the selected images have already been analyzed.\n\n"
                             f"Do you want to include them for re-analysis and reset their status to 'TO DO'?")
                 msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
                 result = msg.exec_()
@@ -2312,7 +2312,7 @@ class PyMarAiGuiApp(QMainWindow):
 
                     if not selected_filenames:
                         QMessageBox.information(self, "No Files to Process",
-                                                "All selected files were already analyzed.")
+                                                "All selected images were already analyzed.")
                         return
 
             # SSH key check and conditional login window
@@ -2386,7 +2386,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     def getPredictionParams(self, selected_filenames):
         if not selected_filenames:
-            self.update_progress_text_signal.emit("[ERROR] No input files to process.\n")
+            self.update_progress_text_signal.emit("[ERROR] No input images to process.\n")
             return None
 
         input_files = [
@@ -2862,7 +2862,7 @@ class FileLoaderWorker(QThread):
         if not file_list:
             ext_str = ", ".join(self.extensions)
             self.errorOccurred.emit(
-                f"[ERROR] No compatible files ({ext_str}) found in the selected folder: {self.dir_path}.\n")
+                f"[ERROR] No compatible images ({ext_str}) found in the selected folder: {self.dir_path}.\n")
             return
 
         file_list.sort()
