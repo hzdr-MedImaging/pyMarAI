@@ -170,7 +170,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.imageFilenameLabel = self.createLabel("No file selected")
         self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum);
         self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
-        self.imageFilenameLabel.setMaximumHeight(16)
+        self.imageFilenameLabel.setMaximumHeight(18)
 
         self.prevButton = self.createButton("↑ Previous", self.showPreviousImage)
         self.nextButton = self.createButton("Next ↓", self.showNextImage)
