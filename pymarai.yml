@@ -1,9 +1,9 @@
 microscopes:
-  - "-"
-  - "1: microscope with 0.2012 pixel per micrometer"
-  - "2: microscope with 0.3534 pixel per micrometer"
-  - "3: microscope with 1.079 pixel per micrometer"
-  - "4: microscope with 1.449 pixel per micrometer"
+  - "-: Please select resolution of used microscope"
+  - "1: 0.2012 pixel/µm"
+  - "2: 0.3534 pixel/µm"
+  - "3: 1.079 pixel/µm"
+  - "4: 1.449 pixel/µm"
 
 default_microscope: "-"
 

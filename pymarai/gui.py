@@ -2396,9 +2396,9 @@ class PyMarAiGuiApp(QMainWindow):
 
         # microscope selection
         microscope_text = self.microscopeComboBox.currentText()
-        if microscope_text.strip() == "-":
+        if microscope_text.strip().startswith("-"):
             self.update_progress_text_signal.emit("No microscope selected.\n")
-            QMessageBox.warning(self, "Input Error", "Please select a microscope.")
+            QMessageBox.warning(self, "Input Error", "Please select resolution of used microscope.")
             return None
 
         # extract microscope code
