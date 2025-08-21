@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import platform
-import yaml
 import paramiko
 import threading
 import logging
@@ -199,9 +198,12 @@ class MarAiBase(ABC):
             for filename in os.listdir(output_dir):
                 if filename.startswith(filename_base):
                     os.remove(os.path.join(output_dir, filename))
-            for filename in os.listdir(os.path.join(output_dir, "corrections")):
-                if filename.startswith(filename_base):
-                    os.remove(os.path.join(output_dir, "corrections", filename))
+
+            corrections_dir = os.path.join(output_dir, "corrections")
+            if os.path.exists(corrections_dir):
+                for filename in os.listdir(corrections_dir):
+                    if filename.startswith(filename_base):
+                        os.remove(os.path.join(corrections_dir, filename))
 
         # --- Move raw _0000.v from tempDir to output_dir ---
         logger.info("Moving raw mic2ecat outputs from tempDir to output_dir...")
