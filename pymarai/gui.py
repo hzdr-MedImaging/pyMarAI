@@ -1812,7 +1812,9 @@ class PyMarAiGuiApp(QMainWindow):
         )
 
         try:
-            subprocess.Popen(command)
+            my_env = os.environ.copy()
+            my_env['ACCEPT_ROVER_DISCLAIMER']='yes'
+            subprocess.Popen(command, env=my_env)
         except Exception as e:
             self.update_progress_text_signal.emit(f"[ERROR] Failed to open ROVER: {e}\n")
             QMessageBox.warning(
@@ -3014,3 +3016,4 @@ def main():
 if __name__ == '__main__':
     multiprocessing.freeze_support()
     main()
+
