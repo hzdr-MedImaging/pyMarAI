@@ -17,6 +17,11 @@ utils:
   nnunet_predict: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_predict"
   nnunet_train: "/usr/local/miniforge3/envs/nnunet-spheroids/bin/nnUNetv2_train"
 
+scripts:
+  preprocess_script: "/pet/projekte/ai/delineation/spheroids/summerStudent/ecat/retrain/process.sh"
+  create_dataset_script: "/opt/marai/scripts/createDataset.sh"
+  custom_split_script: "/opt/marai/scripts/custom_split.py"
+
 nnunet:
   env: "nnunet-spheroids"
   dataset: "Dataset001_spheroids_V1"
@@ -24,6 +29,11 @@ nnunet:
   config: "2d"
   plans: "nnUNetPlans"
   folds: [0, 1, 2, 3, 4]
+
+retrain:
+  training_staging_dir: "/pet/projekte/ai/delineation/spheroids/summerStudent/ecat/retrain2"
+  nnunet_preprocessed_dir: "/pet/projekte/ai/delineation/spheroids/nnUnet/preprocessed"
+  dataset_workdir: "/pet/projekte/ai/delineation/spheroids/nnUnet/raw"
 
 machines:
   saturn:

@@ -53,6 +53,8 @@ class AppConfig(metaclass=Singleton):
         self.machines = self.config.get("machines", [])
         self.utils = self.config.get("utils", {})
         self.nnunet = self.config.get("nnunet", {})
+        self.scripts = self.config.get("scripts", {})
+        self.retrain = self.config.get("retrain", {})
 
     def get_microscopes(self):
         return self.microscopes
@@ -68,6 +70,12 @@ class AppConfig(metaclass=Singleton):
 
     def get_nnunet(self):
         return self.nnunet
+
+    def get_scripts(self):
+        return self.scripts
+
+    def get_retrain(self):
+        return self.retrain
 
     # dynamically choose the first available machine based on CPU/GPU load
     def get_best_available_host(self, username, password=None, ssh_keys=[]) -> Tuple[Optional[str], Optional[str]]:
