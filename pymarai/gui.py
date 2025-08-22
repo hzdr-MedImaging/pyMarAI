@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog
                              QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
                              QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
 
-from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
+from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath, QTransform
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
 from PIL import Image, ImageOps
 
@@ -2969,37 +2969,123 @@ class ScaledLabel(QLabel):
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.zoom_factor = 1
+        self.zoom_factor = 1.0
         self._pixmap = None
+        self._scaled_pixmap = None
+        self._offset = QtCore.QPoint(0, 0)
+        self._dragging = False
+        self._last_pos = None
         if self.pixmap():
             self._pixmap = QPixmap(self.pixmap())
 
     def setPixmap(self, pixmap):
         self._pixmap = pixmap
+        self._offset = QtCore.QPoint(0, 0)
         self.updatePixmap()
 
-    def setZoom(self, zoom_factor):
-        self.zoom_factor = zoom_factor
-        self.updatePixmap()
+    def setZoom(self, zoom_factor, cursor_pos=None):
+        if not self._pixmap:
+            return
+        old_zoom = self.zoom_factor
+        self.zoom_factor = max(1.0, min(10.0, zoom_factor))
+
+        if cursor_pos and self._scaled_pixmap:
+            # compute relative cursor position before zoom
+            rel_x = (cursor_pos.x() - self._offset.x()) / self._scaled_pixmap.width()
+            rel_y = (cursor_pos.y() - self._offset.y()) / self._scaled_pixmap.height()
+
+            # update pixmap scale
+            self.updatePixmap()
+
+            # adjust offset so that cursor stays on same image point
+            new_x = cursor_pos.x() - rel_x * self._scaled_pixmap.width()
+            new_y = cursor_pos.y() - rel_y * self._scaled_pixmap.height()
+            self._offset = QtCore.QPoint(int(new_x), int(new_y))
+            self._clampOffset()
+        else:
+            self.updatePixmap()
+
         self.zoom_changed_signal.emit(self.zoom_factor)
 
     def getZoom(self):
         return self.zoom_factor
 
     def zoomIn(self):
-        if self.zoom_factor < 10:
-            self.setZoom(self.zoom_factor + 1)
+        self.setZoom(self.zoom_factor * 1.25)
 
     def zoomOut(self):
-        if self.zoom_factor > 1:
-            self.setZoom(self.zoom_factor - 1)
+        self.setZoom(self.zoom_factor / 1.25)
 
     def updatePixmap(self):
         if self._pixmap is not None:
-            QLabel.setPixmap(self, self._pixmap.scaled(self.width() * self.zoom_factor, self.height() * self.zoom_factor, Qt.KeepAspectRatio))
+            base = self._pixmap.scaled(
+                self.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+
+            transform = QTransform()
+            transform.scale(self.zoom_factor, self.zoom_factor)
+
+            self._scaled_pixmap = base.transformed(transform, Qt.SmoothTransformation)
+
+            self._clampOffset()
+
+            pm = QPixmap(self.size())
+            pm.fill(Qt.transparent)
+            painter = QPainter(pm)
+            painter.drawPixmap(self._offset, self._scaled_pixmap)
+            painter.end()
+            QLabel.setPixmap(self, pm)
 
     def resizeEvent(self, event):
         self.updatePixmap()
+
+    # --- Panning with mouse ---
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.zoom_factor > 1.0:
+            self._dragging = True
+            self._last_pos = event.pos()
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and self._scaled_pixmap:
+            delta = event.pos() - self._last_pos
+            self._last_pos = event.pos()
+            self._offset += delta
+            self._clampOffset()
+            self.updatePixmap()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._dragging = False
+
+    # --- Zoom with mouse wheel ---
+    def wheelEvent(self, event):
+        if not self._pixmap:
+            return
+        if event.angleDelta().y() > 0:
+            self.setZoom(self.zoom_factor * 1.1, cursor_pos=event.pos())
+        else:
+            self.setZoom(self.zoom_factor / 1.1, cursor_pos=event.pos())
+
+    # --- Helpers ---
+    def _clampOffset(self):
+        if not self._scaled_pixmap:
+            return
+        max_x = 0
+        max_y = 0
+        min_x = self.width() - self._scaled_pixmap.width()
+        min_y = self.height() - self._scaled_pixmap.height()
+
+        if self._scaled_pixmap.width() <= self.width():
+            self._offset.setX((self.width() - self._scaled_pixmap.width()) // 2)
+        else:
+            self._offset.setX(max(min(self._offset.x(), max_x), min_x))
+
+        if self._scaled_pixmap.height() <= self.height():
+            self._offset.setY((self.height() - self._scaled_pixmap.height()) // 2)
+        else:
+            self._offset.setY(max(min(self._offset.y(), max_y), min_y))
 
 # main function to start GUI
 def main():
