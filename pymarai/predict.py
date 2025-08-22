@@ -82,13 +82,21 @@ class PredictionTask:
 # --- progress callback factory ---
 def make_progress_callback(progress_conn: Connection = None, log_fn=print):
     def callback(current_count: int, total_count: int, filename: str, stage_indicator: str):
-        base_name = os.path.basename(filename)
-        if stage_indicator == "nnunet_predicting":
-            msg = f"NNUNet Progress: {current_count}/{total_count} files. Currently processing: {base_name}"
-        elif stage_indicator == "rdf_finished":
-            msg = f"RDF Conversion Progress: {current_count}/{total_count} files. Finished: {base_name}"
+        base_name = os.path.basename(filename) if filename else None
+
+        if stage_indicator == "Running prediction":
+            msg = f"nnUNet progress: {current_count}/{total_count} – {base_name}"
+        elif stage_indicator in [
+            "Converting microscope images …",
+            "Running nnUNet segmentation …",
+            "Generating RDF corrections …",
+            "Finalizing results …"
+        ]:
+            msg = stage_indicator
+        elif stage_indicator:  # catch-all for future stages
+            msg = f"Stage: {stage_indicator} ({current_count}/{total_count})"
         else:
-            msg = f"Progress: {current_count}/{total_count} files processed. Last: {base_name}"
+            msg = f"Progress: {current_count}/{total_count} – Last file: {base_name}"
 
         if log_fn:
             log_fn(msg)

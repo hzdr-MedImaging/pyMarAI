@@ -26,10 +26,9 @@ from multiprocessing import Pipe
 
 from pymarai.config import AppConfig
 
-from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QVBoxLayout, QTableWidgetItem,
-                             QLabel, QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
-                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QToolTip, QSplitter,
-                             QMainWindow)
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QTableWidgetItem, QLabel,
+                             QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
+                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
 
 from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
@@ -280,7 +279,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.progressBarLabel = QLabel()
         self.progressBarLabel.hide()
         self.progressBar = QProgressBar()
-        self.progressBar.setFixedHeight(13)
+        self.progressBar.setFixedHeight(20)
         self.progressBar.setFixedWidth(300)
         self.progressBar.setMinimum(0)
         self.progressBar.setMaximum(100)
@@ -290,8 +289,8 @@ class PyMarAiGuiApp(QMainWindow):
         predictionRunLayout = QHBoxLayout(predictionRunWidget)
         predictionRunLayout.addWidget(self.predictionButton, alignment=Qt.AlignCenter)
         progressBarHLayout = QHBoxLayout()
-        progressBarHLayout.addWidget(self.progressBarLabel)
         progressBarHLayout.addWidget(self.progressBar)
+        progressBarHLayout.addWidget(self.progressBarLabel)
         predictionRunLayout.addLayout(progressBarHLayout)
         predictionRunLayout.addStretch()
 
@@ -1689,6 +1688,25 @@ class PyMarAiGuiApp(QMainWindow):
             self.progressBar.show()
             self.progressBarLabel.show()
 
+    def updateProgressBarDetailed(self, current_count, total_count, filename, stage_indicator):
+        if total_count > 0:
+            # normal progress mode
+            percentage = int((current_count / total_count) * 100)
+            self.progressBar.setMinimum(0)
+            self.progressBar.setMaximum(total_count)
+            self.progressBar.setValue(current_count)
+            self.progressBarLabel.setText(f"{stage_indicator}: {current_count}/{total_count} ({percentage}%)")
+            self.progressBar.show()
+            self.progressBarLabel.show()
+            self.update_progress_text_signal.emit(f"Completed {filename} ({current_count}/{total_count}).\n")
+        else:
+            # busy / indeterminate mode
+            self.progressBar.setMinimum(0)
+            self.progressBar.setMaximum(0)
+            self.progressBarLabel.setText(stage_indicator if stage_indicator else "Processing...")
+            self.progressBar.show()
+            self.progressBarLabel.show()
+
     def setRetrainProgressBarText(self, text=None):
         if text is None:
             self.retrainProgressBarLabel.setText("")
@@ -1702,18 +1720,6 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainProgressBar.setMaximum(0)
             self.retrainProgressBar.show()
             self.retrainProgressBarLabel.show()
-
-    def updateProgressBarDetailed(self, current_count, total_count, filename, stage_indicator):
-        if total_count > 0:
-            percentage = int((current_count / total_count) * 100)
-            self.progressBar.setMaximum(total_count)
-            self.progressBar.setValue(current_count)
-            self.progressBarLabel.setText(f"{stage_indicator}: {current_count}/{total_count} ({percentage}%)")
-            self.progressBar.show()
-            self.progressBarLabel.show()
-            self.update_progress_text_signal.emit(f"Completed {filename} ({current_count}/{total_count}).\n")
-        else:
-            self.setProgressBarText("Starting prediction...")
 
     def updateRetrainProgressBarDetailed(self, current_count, total_count, filename, stage_indicator):
         if total_count > 0:

@@ -45,6 +45,7 @@ class MarAiBase(ABC):
         self.total_expected_files = 0
         self.reported_nnunet_files = set()
         self.reported_rdf_files = set()
+        self.reported_mic2ecat_files = set()
 
         # stop event from the GUI's multiprocessing.Process
         # allows MarAi to check if it should stop
@@ -136,6 +137,7 @@ class MarAiBase(ABC):
         self.progress_callback = progress_callback
         self.total_expected_files = len(input_files)
         self.processed_files_count = 0
+        self.reported_mic2ecat_files.clear()
         self.reported_nnunet_files.clear()
         self.reported_rdf_files.clear()
         self.nnunet_process_finished_event.clear()
@@ -161,8 +163,13 @@ class MarAiBase(ABC):
 
         # --- Run mic2ecat ---
         logger.info("Running mic2ecat...")
+        if self.progress_callback:
+            self.progress_callback(0, 0, None, "Converting microscope images …")
         mic2ecat_cmd = f"cd {tempDir} && find . -maxdepth 1 -name '*.tif' -or -name '*.png' | xargs {self.mic2ecat_path} -j {microscope_number} -v"
-        self.runCommand(mic2ecat_cmd, stream_output=True)
+        mic2ecat_progress_pattern = r"processing file ./(.+\.(?:tif|png))"
+        self.runCommand(mic2ecat_cmd, stream_output=True,
+                        progress_pattern=mic2ecat_progress_pattern,
+                        original_input_files_map=original_input_files_map)
 
         # --- Symlink mic2ecat output in nnunet_input_dir ---
         logger.info("Soft linking mic2ecat output to nnunet_input_dir...")
@@ -177,6 +184,8 @@ class MarAiBase(ABC):
             logger.debug(f"Symlink {os.path.join(nnunet_input_dir, new_filename)} → {old_path}")
 
         # --- Run nnUNet ---
+        if self.progress_callback:
+            self.progress_callback(0, 0, None, "Running nnUNet segmentation …")
         nnunet_cmd = self.get_nnunet_base_cmd(nnunet_input_dir, nnunet_output_dir)
         device_flag = self._get_device_flag(self.host_cfg)
         nnunet_cmd_full = f"{nnunet_cmd} {device_flag}"
@@ -189,8 +198,17 @@ class MarAiBase(ABC):
         nnunet_thread.join()
 
         # --- Run roi2rdf ---
+        if self.progress_callback:
+            self.progress_callback(0, 0, None, "Generating RDF corrections …")
         roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} -v *.v"
-        self.runCommand(roi2rdf_cmd, stream_output=True)
+        roi2rdf_progress_pattern = r"converting rois in file (.+?)\.v$"
+        self.runCommand(roi2rdf_cmd, stream_output=True,
+                        progress_pattern=roi2rdf_progress_pattern,
+                        original_input_files_map=original_input_files_map)
+
+        # --- Busy finalizing ---
+        if self.progress_callback:
+            self.progress_callback(0, 0, None, "Finalizing results …")
 
         # --- Cleanup output_dir stuff from previous runs before storing new stuff
         for filename_base in original_input_files_map:
@@ -272,10 +290,28 @@ class MarAiLocal(MarAiBase):
     # run a local shell command
     def runCommand(self, cmd, stream_output=False, process_event_on_completion=None,
                    progress_pattern=None, original_input_files_map=None):
+
+        # detect stage based on command
         if isinstance(cmd, list):
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, env=os.environ.copy())
+            cmd_str = ' '.join(str(c) for c in cmd)
         else:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, env=os.environ.copy(),
+            cmd_str = str(cmd)
+
+        if "mic2ecat" in cmd_str:
+            stage_indicator = "Progress for mic2ecat"
+        elif "nnUNetv2_predict" in cmd_str:
+            stage_indicator = "Progress for nnUNetv2"
+        elif "roi2Rdf" in cmd_str:
+            stage_indicator = "Progress for roi2Rdf"
+        else:
+            stage_indicator = "Progress"
+
+        if isinstance(cmd, list):
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       universal_newlines=True, env=os.environ.copy())
+        else:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       universal_newlines=True, env=os.environ.copy(),
                                        shell=True, executable="/bin/bash" if platform.system() != 'Windows' else None)
 
         if stream_output:
@@ -288,18 +324,19 @@ class MarAiLocal(MarAiBase):
                         file_prefix_from_output = os.path.splitext(filename)[0]
 
                         if file_prefix_from_output in original_input_files_map and \
-                           file_prefix_from_output not in self.reported_nnunet_files:
+                            file_prefix_from_output not in self.reported_nnunet_files:
                             self.reported_nnunet_files.add(file_prefix_from_output)
-                            current_nnunet_count = len(self.reported_nnunet_files)
+                            current_count = len(self.reported_nnunet_files)
                             original_input_filepath = original_input_files_map[file_prefix_from_output]
 
                             self.progress_callback(
-                                current_nnunet_count,
+                                current_count,
                                 self.total_expected_files,
                                 os.path.basename(original_input_filepath),
-                                "Running prediction"
+                                stage_indicator
                             )
-                            logger.info(f"Reported nnUNet progress for {file_prefix_from_output} via stdout: {current_nnunet_count}/{self.total_expected_files}")
+                            logger.info(
+                                f"Reported progress for {file_prefix_from_output} via stdout: {current_count}/{self.total_expected_files}")
         else:
             output, _ = process.communicate()
             print(output)
@@ -309,7 +346,7 @@ class MarAiLocal(MarAiBase):
             raise RuntimeError(f"[ERROR] Command failed with exit status {exit_status}: {cmd}.\n")
 
         if process_event_on_completion:
-            process_event_on_completion.set()  # signal that this command has completed
+            process_event_on_completion.set()
 
 class MarAiRemote(MarAiBase):
     def __init__(self, hostname=None, username=None, password=None, ssh_keys=None, stop_event=None, gpu_id=None):
@@ -377,7 +414,15 @@ class MarAiRemote(MarAiBase):
         else:
             cmd_str = str(cmd)
 
-        # add CUDA_VISIBLE_DEVICES for GPU-relevant commands
+        if "mic2ecat" in cmd_str:
+            stage_indicator = "Progress for mic2ecat"
+        elif "nnUNetv2_predict" in cmd_str:
+            stage_indicator = "Progress for nnUNetv2"
+        elif "roi2Rdf" in cmd_str:
+            stage_indicator = "Progress for roi2Rdf"
+        else:
+            stage_indicator = "Progress"
+
         gpu_tools = [
             "nnUNetv2_predict",
             "nnUNetv2_train"
@@ -390,6 +435,13 @@ class MarAiRemote(MarAiBase):
         stdin, stdout, stderr = self.ssh.exec_command(full_cmd, get_pty=True)
 
         if stream_output:
+            reported_sets = {
+                "Progress for mic2ecat": self.reported_mic2ecat_files,
+                "Progress for nnUNetv2": self.reported_nnunet_files,
+                "Progress for roi2Rdf": self.reported_rdf_files,
+            }
+            current_reported_set = reported_sets.get(stage_indicator)
+
             for line in iter(stdout.readline, ""):
                 print(line, end='')
                 if progress_pattern and self.progress_callback and original_input_files_map:
@@ -397,17 +449,23 @@ class MarAiRemote(MarAiBase):
                     if match:
                         filename = match.group(1)
                         file_prefix_from_output = os.path.splitext(filename)[0]
-                        if file_prefix_from_output in original_input_files_map and \
-                                file_prefix_from_output not in self.reported_nnunet_files:
-                            self.reported_nnunet_files.add(file_prefix_from_output)
-                            current_nnunet_count = len(self.reported_nnunet_files)
+
+                        if current_reported_set is not None and \
+                                file_prefix_from_output in original_input_files_map and \
+                                file_prefix_from_output not in current_reported_set:
+                            current_reported_set.add(file_prefix_from_output)
+                            current_count = len(current_reported_set)
                             original_input_filepath = original_input_files_map[file_prefix_from_output]
+
                             self.progress_callback(
-                                current_nnunet_count,
+                                current_count,
                                 self.total_expected_files,
                                 os.path.basename(original_input_filepath),
-                                "Running prediction"
+                                stage_indicator
                             )
+                            logging.info(
+                                f"Progress reported for '{file_prefix_from_output}' in stage '{stage_indicator}': {current_count}/{self.total_expected_files}")
+
             for line in iter(stderr.readline, ""):
                 print(line, end='')
         else:
