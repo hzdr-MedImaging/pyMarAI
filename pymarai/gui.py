@@ -110,6 +110,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.initElements()
         self.setCentralWidget(self.tab_widget)
         self.updateInputDirectoryLabel(self.selectedInputDirectory)
+        self.updateRetrainInputDirectoryLabel(self.selectedRetrainInputDirectory)
 
         # Initial window size/pos last saved.
         self.restoreGeometry(self.settings.value("geometry", QByteArray()))
@@ -235,7 +236,6 @@ class PyMarAiGuiApp(QMainWindow):
 
         self.selectAllGoodButton = self.createButton("Select all GOOD", self.selectAllGoodFiles)
         self.selectAllBadButton = self.createButton("Select all BAD", self.selectAllBadFiles)
-        #self.selectAllUntaggedButton = self.createButton("Select All Untagged", self.selectAllUntaggedFiles)
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
         self.openRoverButton.setToolTip(
             "Opens all currently selected images in the ROVER application. It can also be triggered by double-clicking the file of interest.")
@@ -250,7 +250,6 @@ class PyMarAiGuiApp(QMainWindow):
         statusToolsLayout = QHBoxLayout(statusToolsWidget)
         statusToolsLayout.addWidget(self.selectAllGoodButton)
         statusToolsLayout.addWidget(self.selectAllBadButton)
-        #statusToolsLayout.addWidget(self.selectAllUntaggedButton)
         statusToolsLayout.addWidget(self.openRoverButton)
         statusToolsLayout.addWidget(self.saveOutputButton)
         statusToolsLayout.addWidget(self.generateStatsButton)
@@ -329,16 +328,18 @@ class PyMarAiGuiApp(QMainWindow):
     # sets up the layout and widgets for the re-training tab
     def setupRetrainTab(self):
         # --- Input File Section ---
-        retrainInputFileLabel = self.createLabel("Input folder:")
+        self.retrainInputFileLabel = self.createLabel("Input folder:")
         self.retrainInputDirButton = self.createButton("Change Folder", self.loadRetrainInputDirectory)
         self.retrainSelectAllButton = self.createButton("Select All", self.selectAllRetrainFiles)
         self.retrainDeselectAllButton = self.createButton("Deselect All", self.deselectAllRetrainFiles)
+        self.retrainFileCountLabel = self.createLabel("No pairs loaded")
 
         retrainInputFilePathButtonsLayout = QHBoxLayout()
         retrainInputFilePathButtonsLayout.addWidget(self.retrainInputDirButton)
         retrainInputFilePathButtonsLayout.addWidget(self.retrainSelectAllButton)
         retrainInputFilePathButtonsLayout.addWidget(self.retrainDeselectAllButton)
         retrainInputFilePathButtonsLayout.addStretch()
+        retrainInputFilePathButtonsLayout.addWidget(self.retrainFileCountLabel)
 
         self.retrainInputFileListWidget = QListWidget()
         self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -347,7 +348,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         retrainInputFileSectionWidget = QWidget()
         retrainInputFileSectionLayout = QVBoxLayout(retrainInputFileSectionWidget)
-        retrainInputFileSectionLayout.addWidget(retrainInputFileLabel)
+        retrainInputFileSectionLayout.addWidget(self.retrainInputFileLabel)
         retrainInputFileSectionLayout.addWidget(self.retrainInputFileListWidget)
         retrainInputFileSectionLayout.addLayout(retrainInputFilePathButtonsLayout)
 
@@ -359,12 +360,11 @@ class PyMarAiGuiApp(QMainWindow):
             background-color: #fafafa;
             border-radius: 6px;
         """)
-        self.retrainImagePreviewLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.retrainImageFilenameLabel = self.createLabel("No file selected")
         self.retrainImageFilenameLabel.setAlignment(Qt.AlignCenter)
         self.retrainImageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.retrainImageFilenameLabel.setMaximumHeight(16)
+        self.retrainImageFilenameLabel.setMaximumHeight(18)
 
         self.retrainPrevButton = self.createButton("↑ Previous", self.showPreviousRetrainImage)
         self.retrainNextButton = self.createButton("Next ↓", self.showNextRetrainImage)
@@ -616,7 +616,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.openRoverButton.setEnabled(enable)
         self.selectAllGoodButton.setEnabled(enable)
         self.selectAllBadButton.setEnabled(enable)
-        #self.selectAllUntaggedButton.setEnabled(enable)
         self.saveOutputButton.setEnabled(enable)
         self.generateStatsButton.setEnabled(enable)
 
@@ -680,18 +679,22 @@ class PyMarAiGuiApp(QMainWindow):
         lineEdit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         return lineEdit
 
-    # updates the input directory label to show only the last part of the path
-    def updateInputDirectoryLabel(self, dir_path):
+    # return shortened path with ... + last 3 directories
+    def shortenPathForLabel(self, dir_path: str) -> str:
         if dir_path and os.path.isdir(dir_path):
-            # split the path into components and get the last 3
             path_parts = dir_path.split(os.sep)
             display_parts = path_parts[-3:]
+            return f"...{os.sep}{os.sep.join(display_parts)}"
+        return "None selected"
 
-            # join the parts back together with the separator
-            display_path = os.sep.join(display_parts)
-            self.inputFileLabel.setText(f"Input folder: ...{os.sep}{display_path}")
-        else:
-            self.inputFileLabel.setText("Input folder: None selected")
+    # updates the input directory label to show only the last part of the path
+    def updateInputDirectoryLabel(self, dir_path: str):
+        display_path = self.shortenPathForLabel(dir_path)
+        self.inputFileLabel.setText(f"Input folder: {display_path}")
+
+    def updateRetrainInputDirectoryLabel(self, dir_path: str):
+        display_path = self.shortenPathForLabel(dir_path)
+        self.retrainInputFileLabel.setText(f"Input folder: {display_path}")
 
     # updates the file count label to show how many files in directory (and how many of them are selected)
     def updateFileCountLabel(self):
@@ -702,6 +705,15 @@ class PyMarAiGuiApp(QMainWindow):
             self.fileCountLabel.setText(f"{selected_files}/{total_files} images")
         else:
             self.fileCountLabel.setText("No images loaded")
+
+    def updateRetrainFileCountLabel(self):
+        total_files = self.retrainInputFileListWidget.count() // 2  # count pairs
+        selected_files = len(self.retrainInputFileListWidget.selectedItems()) // 2
+
+        if total_files > 0:
+            self.retrainFileCountLabel.setText(f"{selected_files}/{total_files} pairs")
+        else:
+            self.retrainFileCountLabel.setText("No pairs loaded")
 
     # finds the corresponding analyzed output file and sets the microscopeComboBox
     # based on the microscope number in the filename
@@ -865,6 +877,7 @@ class PyMarAiGuiApp(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Re-training Input Folder")
         if dir_path:
             self.settings.setValue("lastRetrainInputDir", dir_path)
+            self.updateRetrainInputDirectoryLabel(dir_path)
             self.loadRetrainFilesFromDirectory(dir_path)
 
     # loads image files from a specified directory for prediction
@@ -956,7 +969,10 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainImagePreviewLabel.setText("No .v or .rdf files found")
             self.retrainImageFilenameLabel.setText("")
 
-        self.update_retrain_progress_text_signal.emit(f"Found {len(file_list)} compatible re-training files.\n")
+        self.update_retrain_progress_text_signal.emit(
+            f"Found {len(file_list)} compatible re-training files.\n"
+        )
+        self.updateRetrainFileCountLabel()
 
     # callback for file loading errors
     def onFileLoadError(self, error_message):
@@ -1018,6 +1034,7 @@ class PyMarAiGuiApp(QMainWindow):
     # updates the re-training preview list based on selected items
     def updateRetrainPreviewList(self):
         items = self.retrainInputFileListWidget.selectedItems()
+        self.updateRetrainFileCountLabel()
         self.originalRetrainImage = None
         self.retrainImagePreviewLabel.clear()
         self.retrainImagePreviewLabel.setText("Image Preview")
@@ -1210,29 +1227,19 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainImagePreviewLabel.setText("No images selected")
             return
 
-        filename_with_ext = self.cleanFilename(self.retrainPreviewList[index])
-        filename_base, _ = os.path.splitext(filename_with_ext)
-        v_filename = filename_base + ".v"
-        v_file_path = os.path.join(self.selectedRetrainInputDirectory, v_filename)
+        full_input_path = self.retrainPreviewList[index]
+        filename = os.path.basename(full_input_path)
+        self.retrainImageFilenameLabel.setText(filename)
 
-        self.retrainImageFilenameLabel.setText(filename_base)
+        self.originalRetrainImage = None
         self.retrainImagePreviewLabel.setText("Loading...")
         self.retrainApplyMaskButton.setEnabled(False)
         self.retrainRemoveMaskButton.setEnabled(False)
-        self.originalRetrainImage = None
 
         try:
-            # check if a masked pixmap is already cached
-            if filename_base in self.retrainMaskedPixmaps:
-                pixmap = self.retrainMaskedPixmaps[filename_base]
-
-                self.retrainImagePreviewLabel.setPixmap(pixmap)
-                self.retrainImagePreviewLabel.setText("")
-                self.retrainApplyMaskButton.setEnabled(False)
-                self.retrainRemoveMaskButton.setEnabled(True)
-                return
-
-            # if no cached mask, load the original V file
+            # load original V file
+            v_filename = os.path.splitext(filename)[0] + ".v"
+            v_file_path = os.path.join(self.selectedRetrainInputDirectory, v_filename)
             if not os.path.exists(v_file_path):
                 raise FileNotFoundError(f".v file not found: {v_file_path}")
 
@@ -1261,29 +1268,9 @@ class PyMarAiGuiApp(QMainWindow):
                           QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimg)
 
-            # resize image height to 600px and calculate width proportionally
-            fixed_height = 600
-            aspect_ratio = pixmap.width() / pixmap.height()
-            new_width = int(fixed_height * aspect_ratio)
-
-            self.retrainImagePreviewLabel.setFixedSize(new_width, fixed_height)
-
-            scaled_pixmap = pixmap.scaled(new_width, fixed_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            # apply rounded corners
-            rounded_pixmap = QPixmap(scaled_pixmap.size())
-            rounded_pixmap.fill(Qt.transparent)
-
-            painter = QPainter(rounded_pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            path = QPainterPath()
-            radius = 8
-            path.addRoundedRect(0, 0, scaled_pixmap.width(), scaled_pixmap.height(), radius, radius)
-            painter.setClipPath(path)
-            painter.drawPixmap(0, 0, scaled_pixmap)
-            painter.end()
-
-            self.retrainImagePreviewLabel.setPixmap(rounded_pixmap)
+            self.retrainImagePreviewLabel.setPixmap(pixmap)
+            self.retrainImagePreviewLabel.setMinimumWidth(100)
+            self.retrainImagePreviewLabel.setMinimumHeight(100)
             self.retrainImagePreviewLabel.setText("")
             self.retrainApplyMaskButton.setEnabled(True)
 
@@ -1294,7 +1281,7 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainApplyMaskButton.setEnabled(False)
             self.retrainRemoveMaskButton.setEnabled(False)
 
-    # generates the CNN mask using thrass and overlays it on the original image based on the selected mask style
+    # overlays CNN mask on the original image based on the selected mask style
     def process_single_image_and_mask(self, filename, input_dir, mask_settings, signals=None):
 
         def emit(msg):
@@ -1394,7 +1381,7 @@ class PyMarAiGuiApp(QMainWindow):
                 signals.errorOccurred.emit(f"[ERROR] Failed to get timestamp: {e}\n")
             raise
 
-        cache_dir = os.path.join(self.hiddenOutputDir, "cnn_masks_retrain")
+        cache_dir = os.path.join(input_dir, "cnn_masks_retrain")
         os.makedirs(cache_dir, exist_ok=True)
         cached_mask_name = f"{base_name}_{v_file_timestamp}_cnn.v"
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
@@ -1489,43 +1476,6 @@ class PyMarAiGuiApp(QMainWindow):
                       QImage.Format_RGBA8888)
         return QPixmap.fromImage(qimg)
 
-    def onMaskingFinishedBatch(self, tab_type, filename, pixmap):
-        if tab_type == "prediction":
-            self.predictionMaskedPixmaps[filename] = pixmap
-        else:
-            self.retrainMaskedPixmaps[filename] = pixmap
-
-        try:
-            finished_index = self.previewList.index(filename)
-            if finished_index == self.previewIndex:
-                self.showImageAtIndex(finished_index)
-
-        except ValueError:
-            pass
-
-    def onMaskingError(self, error_message):
-        self.showProgressMessage(f"[ERROR] Masking failed: {error_message}")
-
-    def onMaskingFinishedAll(self):
-        self.progressBar.hide()
-        self.progressBarLabel.hide()
-        self.enableWidgets(True)
-        self.showProgressMessage("Batch mask application complete.")
-
-        if self.previewList and 0 <= self.previewIndex < len(self.previewList):
-            self.showImageAtIndex(self.previewIndex)
-
-    def onRetrainMaskingFinishedAll(self):
-        self.retrainProgressBar.hide()
-        self.retrainProgressBarLabel.hide()
-        self.enableWidgets(True)
-        self.retrainApplyMaskButton.setEnabled(True)
-        self.retrainRemoveMaskButton.setEnabled(True)
-        self.showProgressMessage("Retrain mask batch complete.")
-
-        if self.retrainPreviewList and 0 <= self.retrainPreviewIndex < len(self.retrainPreviewList):
-            self.showRetrainImageAtIndex(self.retrainPreviewIndex)
-
     # applies the selected mask style to the current prediction image
     def applyPredictionMask(self):
         # clear cached masked images
@@ -1536,37 +1486,12 @@ class PyMarAiGuiApp(QMainWindow):
         self.updatePreviewList()
 
     def applyRetrainMask(self):
-        if not self.retrainPreviewList:
-            return
+        # clear cached masked images
+        self.retrainMaskedPixmaps.clear()
 
-        self.setRetrainProgressBarText("Applying retrain masks...")
-        self.showProgressMessage("Starting retrain mask batch...")
-        self.enableWidgets(False)
-
-        mask_settings = {
-            'show_gradient': self.retrain_show_gradient,
-            'show_filled': self.retrain_show_filled,
-            'show_contour': self.retrain_show_contour,
-            'gradient_colormap': self.retrain_gradient_colormap,
-            'filled_color': self.retrain_filled_color,
-            'contour_color': self.retrain_contour_color
-        }
-
-        self.retrainMaskWorker = MaskBatchWorker(
-            app_instance=self,
-            filenames=self.retrainPreviewList,
-            input_dir=self.selectedRetrainInputDirectory,
-            mask_settings=mask_settings,
-            tab_type="retrain"
-        )
-
-        self.retrainMaskWorker.progress.connect(self.updateRetrainProgressBarDetailed)
-        self.retrainMaskWorker.progress_message.connect(self.showProgressMessage)
-        self.retrainMaskWorker.errorOccurred.connect(self.onMaskingError)
-        self.retrainMaskWorker.result.connect(self.onMaskingFinishedBatch)
-        self.retrainMaskWorker.finished.connect(self.onRetrainMaskingFinishedAll)
-
-        self.retrainMaskWorker.start()
+        # refresh current image (to show original image instead of masked)
+        self.showRetrainImageAtIndex(self.retrainPreviewIndex)
+        self.updateRetrainPreviewList()
 
     # removes the mask overlay and displays the original re-training image
     def removeRetrainMask(self):
