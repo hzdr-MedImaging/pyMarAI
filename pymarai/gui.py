@@ -99,7 +99,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        #self.tab_widget.addTab(self.retrain_tab, "Re-training")
+        self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.tab_widget.currentChanged.connect(self.onTabChanged)
 
@@ -1190,7 +1190,6 @@ class PyMarAiGuiApp(QMainWindow):
                         full_input_path,
                         self.selectedInputDirectory,
                         mask_settings,
-                        signals=None
                     )
                     self.predictionMaskedPixmaps[full_input_path] = pixmap
                 else:
@@ -1237,42 +1236,29 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrainRemoveMaskButton.setEnabled(False)
 
         try:
-            # load original V file
-            v_filename = os.path.splitext(filename)[0] + ".v"
-            v_file_path = os.path.join(self.selectedRetrainInputDirectory, v_filename)
-            if not os.path.exists(v_file_path):
-                raise FileNotFoundError(f".v file not found: {v_file_path}")
+            # always call mask overlay pipeline
+            mask_settings = {
+                'show_gradient': self.prediction_show_gradient,
+                'show_filled': self.prediction_show_filled,
+                'show_contour': self.prediction_show_contour,
+                'gradient_colormap': self.prediction_gradient_colormap,
+                'filled_color': self.prediction_filled_color,
+                'contour_color': self.prediction_contour_color
+            }
 
-            v_data_pmedio = pmedio.read(v_file_path)
-            original_v_data = v_data_pmedio.toarray()
-            original_v_data_squeezed = np.squeeze(original_v_data)
+            pixmap = self.process_single_image_and_mask_retrain(
+                full_input_path,
+                self.selectedRetrainInputDirectory,
+                mask_settings
+            )
 
-            if original_v_data_squeezed.max() > original_v_data_squeezed.min():
-                normalized_original_data = ((original_v_data_squeezed - original_v_data_squeezed.min()) /
-                                            (
-                                                        original_v_data_squeezed.max() - original_v_data_squeezed.min()) * 255).astype(
-                    np.uint8)
-            else:
-                normalized_original_data = np.zeros_like(original_v_data_squeezed, dtype=np.uint8)
-
-            original_image_pil = Image.fromarray(normalized_original_data.T)
-            if original_image_pil.mode != 'RGB':
-                original_image_pil = original_image_pil.convert('RGB')
-
-            self.originalRetrainImage = original_image_pil
-
-            # convert PIL to QPixmap
-            qimg = QImage(self.originalRetrainImage.tobytes("raw", "RGB"),
-                          self.originalRetrainImage.width,
-                          self.originalRetrainImage.height,
-                          QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
-
+            # display result
             self.retrainImagePreviewLabel.setPixmap(pixmap)
             self.retrainImagePreviewLabel.setMinimumWidth(100)
             self.retrainImagePreviewLabel.setMinimumHeight(100)
             self.retrainImagePreviewLabel.setText("")
             self.retrainApplyMaskButton.setEnabled(True)
+            self.retrainRemoveMaskButton.setEnabled(True)
 
         except Exception as e:
             self.retrainImagePreviewLabel.setText(f"Error loading image: {e}")
@@ -1282,14 +1268,7 @@ class PyMarAiGuiApp(QMainWindow):
             self.retrainRemoveMaskButton.setEnabled(False)
 
     # overlays CNN mask on the original image based on the selected mask style
-    def process_single_image_and_mask(self, filename, input_dir, mask_settings, signals=None):
-
-        def emit(msg):
-            if signals:
-                try:
-                    signals.progress_message.emit(msg)
-                except Exception:
-                    pass
+    def process_single_image_and_mask(self, filename, input_dir, mask_settings):
 
         # resolve full path
         if os.path.isabs(filename) and os.path.exists(filename):
@@ -1299,22 +1278,32 @@ class PyMarAiGuiApp(QMainWindow):
 
         base_name = os.path.splitext(os.path.basename(full_input_path))[0]
 
-        # load the original image first
-        original_image_pil = Image.open(full_input_path)
-        original_image_pil = ImageOps.exif_transpose(original_image_pil)
-        if original_image_pil.mode != "RGB":
-            original_image_pil = original_image_pil.convert("RGB")
+        try:
+            # load the original image first
+            original_image_pil = Image.open(full_input_path)
+            original_image_pil = ImageOps.exif_transpose(original_image_pil)
+            if original_image_pil.mode != "RGB":
+                original_image_pil = original_image_pil.convert("RGB")
+        except Exception as e:
+            self.update_progress_text_signal.emit(
+                f"[ERROR] Error loading image '{full_input_path}': {e}.\n"
+            )
+            return None
 
         # check for the hidden output directory
         if not os.path.isdir(self.hiddenOutputDir):
-            emit(f"[ERROR] Output directory not found: {self.hiddenOutputDir}\n")
+            self.update_progress_text_signal.emit(
+                f"[ERROR] Output directory not found: {self.hiddenOutputDir}\n"
+            )
             return self._load_and_convert_image(full_input_path)
 
         # find all files in the directory that start with the base name and contain "_cnn"
         matching_files = [f for f in os.listdir(self.hiddenOutputDir) if f.startswith(base_name) and "_cnn" in f]
 
         if not matching_files:
-            emit(f"[WARNING] Corresponding CNN mask file not found for {base_name}. Displaying original image.\n")
+            self.update_progress_text_signal.emit(
+                f"[WARNING] Corresponding CNN mask file not found for {base_name}. Displaying original image.\n"
+            )
             combined_image_pil = original_image_pil.convert('RGBA')
             qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
                           combined_image_pil.width,
@@ -1326,8 +1315,15 @@ class PyMarAiGuiApp(QMainWindow):
         matching_files.sort(key=lambda f: os.path.getmtime(os.path.join(self.hiddenOutputDir, f)), reverse=True)
         mask_file_to_use = os.path.join(self.hiddenOutputDir, matching_files[0])
 
-        # load mask data
-        mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
+        try:
+            # load mask data
+            mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
+        except Exception as e:
+            self.update_progress_text_signal.emit(
+                f"[ERROR] Failed to load mask file '{mask_file_to_use}': {e}.\n"
+            )
+            return self._load_and_convert_image(full_input_path)
+
         if mask_data.max() > mask_data.min():
             normalized_mask = ((mask_data - mask_data.min()) /
                                (mask_data.max() - mask_data.min()) * 255).astype(np.uint8)
@@ -1361,13 +1357,14 @@ class PyMarAiGuiApp(QMainWindow):
             )
 
         qimg = QImage(combined_image_pil.tobytes("raw", "RGBA"),
-                      combined_image_pil.width, combined_image_pil.height,
+                      combined_image_pil.width,
+                      combined_image_pil.height,
                       QImage.Format_RGBA8888)
 
         return QPixmap.fromImage(qimg)
 
     # generates the CNN mask for re-training data and overlays it on the original .v image
-    def process_single_image_and_mask_retrain(self, filename, input_dir, mask_settings, signals=None):
+    def process_single_image_and_mask_retrain(self, filename, input_dir, mask_settings):
         base_name, _ = os.path.splitext(filename)
         v_filename = base_name + ".v"
         v_file_path = os.path.join(input_dir, v_filename)
@@ -1377,8 +1374,9 @@ class PyMarAiGuiApp(QMainWindow):
             v_file_mtime = os.path.getmtime(v_file_path)
             v_file_timestamp = time.strftime("%Y%m%d%H%M%S", time.localtime(v_file_mtime))
         except Exception as e:
-            if signals:
-                signals.errorOccurred.emit(f"[ERROR] Failed to get timestamp: {e}\n")
+            self.update_retrain_progress_text_signal.emit(
+                f"[ERROR] Failed to get timestamp for {filename}: {e}\n"
+            )
             raise
 
         cache_dir = os.path.join(input_dir, "cnn_masks_retrain")
@@ -1387,12 +1385,14 @@ class PyMarAiGuiApp(QMainWindow):
         cached_mask_path = os.path.join(cache_dir, cached_mask_name)
 
         if os.path.exists(cached_mask_path) and os.path.getmtime(cached_mask_path) >= v_file_mtime:
-            if signals:
-                signals.progress_message.emit(f"[INFO] Using cached mask for {filename}\n")
+            self.update_retrain_progress_text_signal.emit(
+                f"[INFO] Using cached mask for {filename}\n"
+            )
             mask_file_to_use = cached_mask_path
         else:
-            if signals:
-                signals.progress_message.emit(f"Running thrass for retrain mask generation on {filename}...\n")
+            self.update_retrain_progress_text_signal.emit(
+                f"[INFO] Running thrass for retrain mask generation on {filename}...\n"
+            )
 
             thrass_command = [self.utils['thrass'], "-t", "cnnPrepare", "-b", v_filename]
             result = subprocess.run(
@@ -1403,12 +1403,14 @@ class PyMarAiGuiApp(QMainWindow):
                 env=os.environ.copy()
             )
 
-            if signals:
-                signals.progress_message.emit(f"Thrass stdout:\n{result.stdout}\n")
-                if result.stderr:
-                    signals.progress_message.emit(f"Thrass stderr:\n{result.stderr}\n")
+            self.update_retrain_progress_text_signal.emit(f"Thrass stdout:\n{result.stdout}\n")
+            if result.stderr:
+                self.update_retrain_progress_text_signal.emit(f"Thrass stderr:\n{result.stderr}\n")
 
             if result.returncode != 0:
+                self.update_retrain_progress_text_signal.emit(
+                    f"[ERROR] Thrass failed with exit code {result.returncode} for file: {v_file_path}\n"
+                )
                 raise RuntimeError(f"Thrass failed with exit code {result.returncode} for file: {v_file_path}")
 
             wait_time = 0
@@ -1417,23 +1419,28 @@ class PyMarAiGuiApp(QMainWindow):
                 wait_time += 0.5
 
             if not os.path.exists(generated_mask_path):
-                raise FileNotFoundError(f"Thrass mask file not found at: {generated_mask_path}\n"
-                                        f"Check RDF for {v_file_path}.")
+                self.update_retrain_progress_text_signal.emit(
+                    f"[ERROR] Thrass mask file not found at: {generated_mask_path}\nCheck RDF for {v_file_path}.\n"
+                )
+                raise FileNotFoundError(f"Thrass mask file not found at: {generated_mask_path}")
 
             shutil.copy2(generated_mask_path, cached_mask_path)
-            if signals:
-                signals.progress_message.emit(f"[INFO] Cached mask: {cached_mask_path}\n")
+            self.update_retrain_progress_text_signal.emit(
+                f"[INFO] Cached mask: {cached_mask_path}\n"
+            )
             mask_file_to_use = cached_mask_path
 
             for fname in os.listdir(input_dir):
                 if fname.startswith(base_name + "_cnn") and fname.endswith(".v"):
                     try:
                         os.remove(os.path.join(input_dir, fname))
-                        if signals:
-                            signals.progress_message.emit(f"[INFO] Deleted Thrass output file: {fname}\n")
+                        self.update_retrain_progress_text_signal.emit(
+                            f"[INFO] Deleted Thrass output file: {fname}\n"
+                        )
                     except Exception as e:
-                        if signals:
-                            signals.progress_message.emit(f"[WARNING] Failed to delete {fname}: {e}\n")
+                        self.update_retrain_progress_text_signal.emit(
+                            f"[WARNING] Failed to delete {fname}: {e}\n"
+                        )
 
         # Load and normalize mask
         mask_data = np.squeeze(pmedio.read(mask_file_to_use).toarray())
@@ -2768,55 +2775,6 @@ class FileLoaderWorker(QThread):
         file_list.sort()
         self.filesLoaded.emit(file_list, self.dir_path)
 
-
-class MaskBatchWorker(QThread):
-    progress = pyqtSignal(int, int, str, str)
-    progress_message = pyqtSignal(str)
-    errorOccurred = pyqtSignal(str)
-    finished = pyqtSignal()
-    result = pyqtSignal(str, str, QPixmap)
-
-    def __init__(self, app_instance, filenames, input_dir, mask_settings, tab_type, parent=None):
-        super().__init__(parent)
-        self.app = app_instance
-        self.filenames = filenames
-        self.input_dir = input_dir
-        self.mask_settings = mask_settings
-        self.tab_type = tab_type
-        self._abort = False
-
-    def run(self):
-        total = len(self.filenames)
-
-        for i, filename in enumerate(self.filenames):
-            if self._abort:
-                self.progress_message.emit("Batch mask application aborted.\n")
-                break
-
-            try:
-                # select method based on tab_type
-                if self.tab_type == "prediction":
-                    pixmap = self.app.process_single_image_and_mask(
-                        filename, self.input_dir, self.mask_settings, signals=self
-                    )
-                elif self.tab_type == "retrain":
-                    pixmap = self.app.process_single_image_and_mask_retrain(
-                        filename, self.input_dir, self.mask_settings, signals=self
-                    )
-                else:
-                    raise ValueError(f"Unknown tab_type: {self.tab_type}")
-
-                self.result.emit(self.tab_type, filename, pixmap)
-                self.progress.emit(i + 1, total, filename, "Masking")
-
-            except Exception as e:
-                self.errorOccurred.emit(f"[ERROR] Failed to mask {filename}: {str(e)}\n{traceback.format_exc()}")
-                continue
-
-        self.finished.emit()
-
-    def abort(self):
-        self._abort = True
 
 class FileStatusWorker(QThread):
     batch_ready = pyqtSignal(list)  # list of (row, text, color, status)
