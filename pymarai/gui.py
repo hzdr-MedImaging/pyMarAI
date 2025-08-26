@@ -5,20 +5,18 @@ import os
 import subprocess
 import multiprocessing
 import logging
-
-from pymarai import login
-
-import pymarai.login
-import pymarai.predict
-import traceback
 import shutil
 import pmedio
 import time
-import numpy as np
-import matplotlib.pyplot as plt
 import cv2
 import csv
 import re
+import numpy as np
+import matplotlib.pyplot as plt
+
+import pymarai.login
+import pymarai.predict
+import pymarai.retrain
 from pymarai.__init__ import __version__
 
 from PyQt5 import QtCore
@@ -27,10 +25,10 @@ from multiprocessing import Pipe
 from pymarai.config import AppConfig
 
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QTableWidgetItem, QLabel,
-                             QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget,
+                             QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget, QFormLayout,
                              QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
 
-from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QPainterPath, QTransform
+from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QTransform
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
 from PIL import Image, ImageOps
 
@@ -46,6 +44,8 @@ class PyMarAiGuiApp(QMainWindow):
     processing_finished_signal = pyqtSignal()
     processing_started_signal = pyqtSignal()
     update_retrain_progress_text_signal = pyqtSignal(str)
+    processing_retrain_finished_signal = pyqtSignal()
+    processing_retrain_started_signal = pyqtSignal()
 
     def __init__(self, config: AppConfig, parent=None):
         super(PyMarAiGuiApp, self).__init__(parent)
@@ -71,6 +71,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.fileLoader = None
         self.statusWorker = None
         self.processingRunning = False
+        self.processingRetrainRunning = False
         self.outputBasenames = set()
 
         self.file_status = {}  # stores "good", "bad", or None
@@ -92,6 +93,8 @@ class PyMarAiGuiApp(QMainWindow):
         self.processing_finished_signal.connect(self.processingFinished)
         self.processing_started_signal.connect(self.processingStarted)
         self.update_retrain_progress_text_signal.connect(self.showRetrainProgressMessage)
+        self.processing_retrain_finished_signal.connect(self.processingRetrainFinished)
+        self.processing_retrain_started_signal.connect(self.processingRetrainStarted)
 
         # setup tab widget and tabs
         self.tab_widget = QTabWidget()
@@ -117,7 +120,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.restoreState(self.settings.value("windowState", QByteArray()))
         self.predictionTopSplitterWidget.restoreState(self.settings.value("predictionTopSplitterWidget", QByteArray()))
         self.predictionBottomSplitterWidget.restoreState(self.settings.value("predictionBottomSplitterWidget", QByteArray()))
-        self.imagePreviewLabel.setZoom(int(self.settings.value("imagePreviewLabelZoom", 1)))
+        self.imagePreviewLabel.setZoom(self.settings.value("imagePreviewLabelZoom", 1))
 
     # close event to perform certain things while the main gui is being closed
     def closeEvent(self, e):
@@ -427,6 +430,20 @@ class PyMarAiGuiApp(QMainWindow):
         retrainImagePreviewLayout.addWidget(retrainImagePreviewSubWidget)
         retrainImagePreviewLayout.addWidget(retrainMaskControlsWidget)
 
+        # --- Dataset Metadata Section ---
+        self.retrainDatasetIdLineEdit = QLineEdit()
+        self.retrainDatasetIdLineEdit.setPlaceholderText("Paste dataset ID here...")
+
+        self.retrainDatasetDescriptionEdit = QLineEdit()
+        self.retrainDatasetDescriptionEdit.setPlaceholderText("Enter dataset description here...")
+
+        datasetMetadataLayout = QFormLayout()
+        datasetMetadataLayout.addRow("Dataset ID:", self.retrainDatasetIdLineEdit)
+        datasetMetadataLayout.addRow("Dataset Description:", self.retrainDatasetDescriptionEdit)
+
+        datasetMetadataWidget = QWidget()
+        datasetMetadataWidget.setLayout(datasetMetadataLayout)
+
         # --- Run Button + Progress Bar ---
         self.retrainButton = self.createButton("Run Re-training", self.retrainButtonPressed)
         self.retrainButton.setFixedSize(140, 36)
@@ -464,6 +481,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         retrainControlWidget = QWidget()
         retrainControlLayout = QVBoxLayout(retrainControlWidget)
+        retrainControlLayout.addWidget(datasetMetadataWidget)
         retrainControlLayout.addWidget(retrainRunWidget)
         retrainControlLayout.addWidget(retrainLogWidget)
 
@@ -618,6 +636,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.selectAllBadButton.setEnabled(enable)
         self.saveOutputButton.setEnabled(enable)
         self.generateStatsButton.setEnabled(enable)
+        self.refresh_mask_button.setEnabled(enable)
 
         # prediction tab mask widgets
         self.prediction_gradient_checkbox.setEnabled(enable)
@@ -906,9 +925,9 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrainInputFileListWidget.clear()
         self.retrainPreviewList = []
 
-        self.processingRunning = True
+        self.processingRetrainRunning = True
         self.enableWidgets(False)
-        self.predictionButton.setEnabled(False)
+        self.retrainButton.setEnabled(False)
 
         self.retrainFileLoader = FileLoaderWorker(dir_path, (".v", ".rdf"))
         self.retrainFileLoader.filesLoaded.connect(self.onRetrainFilesLoaded)
@@ -990,9 +1009,9 @@ class PyMarAiGuiApp(QMainWindow):
 
     # callback when re-training file loading is finished
     def retrainFileLoadingFinished(self):
-        self.processingRunning = False
+        self.processingRetrainRunning = False
         self.enableWidgets(True)
-        self.predictionButton.setEnabled(True)
+        self.retrainButton.setEnabled(True)
 
     # updates the prediction preview list based on selected items
     def updatePreviewList(self):
@@ -1674,6 +1693,15 @@ class PyMarAiGuiApp(QMainWindow):
             self.predictionButton.setText("Run Prediction")
             self.predictionButton.setEnabled(True)  # re-enable after prediction finishes or stops
 
+        # switching between two states of elements for re-training and user interaction mode
+        def switchElementsToRetrain(self, isRetrain):
+            if isPrediction:
+                self.retrainButton.setText("Stop")
+                self.retrainButton.setEnabled(True)
+            else:
+                self.retrainButton.setText("Run Re-training")
+                self.pretrainButton.setEnabled(True)
+
     def openMultipleFilesInRover(self, selected_filenames):
         output_dir = self.hiddenOutputDir
         if not os.path.isdir(output_dir):
@@ -2243,7 +2271,7 @@ class PyMarAiGuiApp(QMainWindow):
                 login_successful = True # Assume success if key exists
             else:
                 self.update_progress_text_signal.emit("No SSH key found. Prompting for password via Login Window.\n")
-                login_dialog = login.LoginDialog(self)
+                login_dialog = pymarai.login.LoginDialog(self)
                 if login_dialog.exec_() == QMessageBox.Accepted:
                     username, password = login_dialog.get_credentials()
                     if not username or not password:
@@ -2291,7 +2319,6 @@ class PyMarAiGuiApp(QMainWindow):
 
     # function to combine the selected parameters and actually
     # start the prediction by passing these parameters
-    # to runPrediction.py main function (now getPredictionParams)
 
     def getPredictionParams(self, selected_filenames):
         if not selected_filenames:
@@ -2371,8 +2398,22 @@ class PyMarAiGuiApp(QMainWindow):
         self.switchElementsToPrediction(False)
         self.updatePreviewLabel()
 
-    def retrainButtonPressed(self):
-        pass
+    # call when retraining thread started
+    def processingRetrainStarted(self):
+        self.processingRetrainRunning = True
+        self.enableWidgets(False)
+        self.switchElementsToRetrain(True)
+
+    # call when retraining thread finished (or stopped)
+    def processingRetrainFinished(self):
+        self.processingRetrainRunning = False
+        self.enableWidgets(True)
+        self.retrainProgressBar.hide()
+        self.retrainProgressBarLabel.hide()
+        self.updateRetrainOutputBasenames()
+        self.markRetrainedFiles()
+        self.switchElementsToRetrain(False)
+        self.updateRetrainPreviewLabel()
 
     def updatePreviewLabel(self):
         if self.current_preview_filename:
@@ -2526,7 +2567,111 @@ class PyMarAiGuiApp(QMainWindow):
         except Exception as e:
             self.update_progress_text_signal.emit(f"[ERROR] refresh_mask failed: {e}\n")
 
+    def retrainButtonPressed(self):
+        if not self.processingRetrainRunning:
+            selected_items = self.retrainInputFileListWidget.selectedItems()
+            if not selected_items:
+                self.update_retrain_progress_text_signal.emit("No files selected for retraining.\n")
+                return
 
+            input_files = [self.cleanFilename(item.text()) for item in selected_items]
+
+            retrain_params = self.getRetrainParams(input_files)
+            if retrain_params is None:
+                return
+
+            # --- SSH key / login flow (same as prediction) ---
+            ssh_dir = os.path.expanduser("~/.ssh")
+            ssh_key_paths = [
+                os.path.join(ssh_dir, "id_ed25519"),
+                os.path.join(ssh_dir, "id_rsa"),
+            ]
+            ssh_keys = [f for f in ssh_key_paths if os.path.exists(f)]
+
+            username = os.getlogin()
+            password = ""
+            login_successful = False
+
+            if ssh_keys:
+                self.update_retrain_progress_text_signal.emit(
+                    "SSH key found for user. Proceeding without password prompt.\n")
+                login_successful = True
+            else:
+                self.update_retrain_progress_text_signal.emit(
+                    "No SSH key found. Prompting for password via Login Window.\n")
+                login_dialog = pymarai.login.LoginDialog(self)
+                if login_dialog.exec_() == QMessageBox.Accepted:
+                    username, password = login_dialog.get_credentials()
+                    if not username or not password:
+                        self.update_retrain_progress_text_signal.emit("Username or password cannot be empty.\n")
+                        QMessageBox.warning(self, "Login Error", "Username or password cannot be empty.")
+                        return
+                    login_successful = True
+                else:
+                    self.update_retrain_progress_text_signal.emit("[ERROR] Login cancelled.\n")
+                    return
+
+            if login_successful:
+                self.retrainProgressPlainTextEdit.clear()
+
+                self.retrainThread = PyMarAiRetrainThread(
+                    parent=self,
+                    params=retrain_params,
+                    username=username,
+                    password=password,
+                    ssh_keys=ssh_keys
+                )
+                self.retrainThread.started.connect(self.processing_retrain_started_signal.emit)
+                self.retrainThread.finished.connect(self.processing_retrain_finished_signal.emit)
+                self.retrainThread.progress_update.connect(self.updateRetrainProgressBarDetailed)
+                self.retrainThread.text_update.connect(self.update_retrain_progress_text_signal)
+                self.retrainThread.error_message.connect(
+                    lambda msg: QMessageBox.critical(self, "Retraining Error", msg))
+
+                self.retrainThread.start()
+                self.switchElementsToRetrain(True)
+
+        else:
+            if self.retrainThread and self.retrainThread.isRunning():
+                self.update_retrain_progress_text_signal.emit("\n*** Aborting retraining ***\n")
+                self.retrainThread.stop_retrain_process()
+                self.switchElementsToRetrain(False)
+
+    def getRetrainParams(self, input_files):
+        if not input_files:
+            self.update_retrain_progress_text_signal.emit("[ERROR] No input files for retraining.\n")
+            return None
+
+        # dataset metadata
+        dataset_id = self.retrainDatasetIdLineEdit.text().strip()
+        dataset_description = self.retrainDatasetDescriptionEdit.text().strip()
+
+        if not dataset_id:
+            QMessageBox.warning(self, "Missing Dataset ID", "Please enter a dataset ID before retraining.")
+            return None
+
+        if dataset_description:
+            dataset_description = dataset_description.replace(" ", "_")
+        else:
+            dataset_description = "GUI_retraining_session"
+
+        # log info
+        filenames_to_log = [os.path.basename(f) for f in input_files]
+        log_message = ", ".join(filenames_to_log)
+        self.update_retrain_progress_text_signal.emit(
+            f"Running retraining with {len(input_files)} file(s).\n"
+            f"Input files: {log_message}\n"
+            f"Dataset ID: {dataset_id}\n"
+            f"Description: {dataset_description}\n"
+        )
+
+        return {
+            "input_files": input_files,
+            "dataset_id": int(dataset_id),
+            "description": dataset_description
+        }
+
+# --- Prediction Workflow ---
 class PyMarAiThread(QtCore.QThread):
     progress_update = pyqtSignal(int, int, str, str)
     text_update = pyqtSignal(str)
@@ -2745,6 +2890,123 @@ class StdIORedirector:
     def flush(self):
         # no-op for pipes, as send is usually immediate
         pass
+
+# --- Re-Training Workflow ---
+class PyMarAiRetrainThread(QtCore.QThread):
+    progress_update = pyqtSignal(int, int, str, str)
+    text_update = pyqtSignal(str)
+    error_message = pyqtSignal(str)
+
+    def __init__(self, parent, params, username, password, ssh_keys):
+        super().__init__()
+        self.parent = parent
+        self.params = params
+        self.username = username
+        self.password = password
+        self.ssh_keys = ssh_keys
+        self._process = None
+
+        # Pipes
+        self.stdout_pipe_parent, self.stdout_pipe_child = Pipe(duplex=False)
+        self.progress_pipe_parent, self.progress_pipe_child = Pipe(duplex=False)
+
+        # Emitters
+        self.stdout_emitter = PyMarAiThread.Emitter(self.stdout_pipe_parent)
+        self.stdout_emitter.message.connect(self.text_update)
+        self.stdout_emitter.start()
+
+        self.progress_emitter = PyMarAiThread.ProgressEmitter(self.progress_pipe_parent)
+        self.progress_emitter.progress.connect(self.progress_update)
+        self.progress_emitter.start()
+
+    def run(self):
+        self.text_update.emit("Starting retraining process...\n")
+        try:
+            self._process = self.RetrainProcess(
+                target=pymarai.retrain.gui_entry_point,
+                params=self.params,
+                username=self.username,
+                password=self.password,
+                ssh_keys=self.ssh_keys,
+                stdout_pipe_child=self.stdout_pipe_child,
+                progress_pipe_child=self.progress_pipe_child,
+            )
+
+            self._process.start()
+            self._process.join()
+
+            if self._process.exitcode != 0:
+                self.error_message.emit(f"[ERROR] Retrain process exited with error code: {self._process.exitcode}")
+                self.text_update.emit(f"[ERROR] Retrain process failed with exit code: {self._process.exitcode}\n")
+            else:
+                self.text_update.emit("[INFO] Retraining process completed.\n")
+
+        except Exception as e:
+            self.error_message.emit(f"[ERROR] An unexpected error occurred: {e}")
+            self.text_update.emit(f"[ERROR] Unexpected error during retraining: {e}\n")
+        finally:
+            self.stdout_emitter.stop_and_wait()
+            self.progress_emitter.stop_and_wait()
+
+    def stop_retrain_process(self):
+        if self._process and self._process.is_alive():
+            self.text_update.emit("[INFO] Terminating retraining process...\n")
+            self._process.terminate()
+            self._process.join(timeout=5)
+            if self._process.is_alive():
+                self.text_update.emit("Warning: Retraining process did not terminate gracefully.\n")
+            else:
+                self.text_update.emit("[INFO] Retraining process terminated.\n")
+
+            self.stdout_emitter.stop_and_wait()
+            self.progress_emitter.stop_and_wait()
+            self.finished.emit()
+
+    class RetrainProcess(multiprocessing.Process):
+        def __init__(self, target, **kwargs):
+            super().__init__()
+            self._target = target
+            self._all_kwargs = kwargs
+
+        def run(self):
+            stdout_pipe_child = self._all_kwargs.pop('stdout_pipe_child')
+            progress_pipe_child = self._all_kwargs.pop('progress_pipe_child')
+            stop_event = self._all_kwargs.pop('stop_event', None)
+
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            try:
+                sys.stdout = StdIORedirector(stdout_pipe_child)
+                sys.stderr = StdIORedirector(stdout_pipe_child)
+
+                self._target(
+                    progress_pipe_connection=progress_pipe_child,
+                    stdout_pipe_connection=stdout_pipe_child,
+                    stop_event=stop_event,
+                    **self._all_kwargs
+                )
+            except Exception as e:
+                error_msg = f"Unhandled exception in retrain process: {e}\n"
+                logger.exception(error_msg)
+                if not stdout_pipe_child.closed:
+                    try:
+                        stdout_pipe_child.send(f"[ERROR] {error_msg}")
+                    except Exception:
+                        pass
+            finally:
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
+
+                if stdout_pipe_child and not stdout_pipe_child.closed:
+                    try:
+                        stdout_pipe_child.close()
+                    except Exception:
+                        pass
+                if progress_pipe_child and not progress_pipe_child.closed:
+                    try:
+                        progress_pipe_child.close()
+                    except Exception:
+                        pass
 
 # thread to load data
 class FileLoaderWorker(QThread):
