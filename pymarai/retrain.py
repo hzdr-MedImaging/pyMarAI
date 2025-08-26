@@ -2,8 +2,10 @@ import os
 import argparse
 import traceback
 import logging
+import platform
 from typing import List, Tuple, Optional, Dict
 
+from pymarai.config import AppConfig
 from remarai import MarAiRemoteRetrain
 
 from multiprocessing import Event
@@ -129,6 +131,111 @@ def make_progress_callback(progress_conn: Connection = None, log_fn=print):
                 if log_fn:
                     log_fn("Progress connection closed; cannot send update.")
     return callback
+
+
+# --- GUI entry point ---
+def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
+                    progress_pipe_connection: Connection,
+                    stdout_pipe_connection: Connection,
+                    stop_event: Event = None):
+
+    # Setup logging to send to stdout_pipe
+    class PipeHandler(logging.Handler):
+        def __init__(self, pipe_conn: Connection):
+            super().__init__()
+            self.pipe = pipe_conn
+            self.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+        def emit(self, record):
+            if self.pipe and not self.pipe.closed:
+                try:
+                    msg = self.format(record)
+                    self.pipe.send(msg + "\n")
+                except Exception:
+                    pass
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    pipe_handler = PipeHandler(stdout_pipe_connection)
+    root_logger.addHandler(pipe_handler)
+    root_logger.setLevel(logging.DEBUG)
+
+    def gui_log_fn(msg):
+        root_logger.debug(msg)
+
+    progress_callback = make_progress_callback(progress_pipe_connection, gui_log_fn)
+
+    try:
+        hostname, _ = AppConfig().get_best_available_host()
+        if not hostname:
+            raise RuntimeError("No available host found.")
+
+        current_hostname = platform.node()
+        use_local = (current_hostname == hostname)
+
+        if use_local:
+            gui_log_fn(f"Selected local host {hostname}. Running locally.")
+        elif username and not password and ssh_keys:
+            gui_log_fn(f"Running remotely on {hostname} using SSH keys (no password).")
+        elif username and password and not ssh_keys:
+            gui_log_fn(f"Running remotely on {hostname} using password authentication.")
+
+        # GPU config from params or defaults
+        gpu_ids = params.get("gpu_ids") or [0, 1, 2, 3]
+        folds = params.get("folds") or [0, 1, 2, 3, 4]
+
+        # collect training data
+        input_files = params.get("input_files", [])
+        rdf_pairs = []
+
+        gui_log_fn(f"Collecting .v/.rdf pairs from selected input files ({len(input_files)}).")
+        abs_files = [os.path.abspath(f) for f in input_files]
+
+        # index rdf files by basename
+        rdf_index = {
+            os.path.splitext(os.path.basename(f))[0]: f
+            for f in abs_files if f.lower().endswith(".rdf")
+        }
+        for f in abs_files:
+            if f.lower().endswith(".v"):
+                base = os.path.splitext(os.path.basename(f))[0]
+                rdf_path = rdf_index.get(base)
+                if rdf_path and os.path.isfile(rdf_path):
+                    rdf_pairs.append((f, rdf_path))
+                else:
+                    gui_log_fn(f"[WARNING] Missing matching .rdf for {f}")
+
+        if not rdf_pairs:
+            raise RuntimeError("No matching .v/.rdf pairs found for training.")
+
+        gui_log_fn(f"Performing training on {hostname} using GPUs {gpu_ids} and folds {folds}")
+
+        task = TrainingTask(
+            rdf_pairs=rdf_pairs,
+            dataset_id=params.get("dataset_id"),
+            description=params.get("description", ""),
+            hostname=hostname,
+            ssh_username=username,
+            ssh_password=password,
+            ssh_keys=ssh_keys,
+            gpu_ids=gpu_ids,
+            folds=folds,
+            stop_event=stop_event,
+            progress_callback=progress_callback,
+            log_fn=gui_log_fn
+        )
+        task.run()
+
+    except Exception as e:
+        root_logger.error(f"Unhandled exception in gui_entry_point (retrain): {e}", exc_info=True)
+        raise
+
+    finally:
+        # Clean up pipes
+        if stdout_pipe_connection and not stdout_pipe_connection.closed:
+            stdout_pipe_connection.close()
+        if progress_pipe_connection and not progress_pipe_connection.closed:
+            progress_pipe_connection.close()
 
 
 # --- CLI entry point ---
