@@ -1238,12 +1238,12 @@ class PyMarAiGuiApp(QMainWindow):
         try:
             # always call mask overlay pipeline
             mask_settings = {
-                'show_gradient': self.prediction_show_gradient,
-                'show_filled': self.prediction_show_filled,
-                'show_contour': self.prediction_show_contour,
-                'gradient_colormap': self.prediction_gradient_colormap,
-                'filled_color': self.prediction_filled_color,
-                'contour_color': self.prediction_contour_color
+                'show_gradient': self.retrain_show_gradient,
+                'show_filled': self.retrain_show_filled,
+                'show_contour': self.retrain_show_contour,
+                'gradient_colormap': self.retrain_gradient_colormap,
+                'filled_color': self.retrain_filled_color,
+                'contour_color': self.retrain_contour_color
             }
 
             pixmap = self.process_single_image_and_mask_retrain(
