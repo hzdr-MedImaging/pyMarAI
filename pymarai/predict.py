@@ -205,7 +205,13 @@ def main(args=None):
         add_help=True
     )
 
-    parser.add_argument("--input", action="append", required=True, help="Input file(s) to process")
+    # --- input options ---
+    parser.add_argument("--input", action="append", help="Input file(s) to process (can repeat)")
+    parser.add_argument("--input-list", help="Text file containing list of input files (one per line)")
+    parser.add_argument("--input-dir", help="Directory containing input files")
+    parser.add_argument("--glob", help="Glob pattern when using --input-dir (default: both *.tif and *.png)")
+
+    # --- other options ---
     parser.add_argument("--output", required=True, help="Directory to store output files")
     parser.add_argument("--microscope", type=int, required=True, help="Microscope ID used")
     parser.add_argument("--local", action="store_true", help="Run prediction locally")
@@ -214,12 +220,32 @@ def main(args=None):
 
     parsed_args = parser.parse_args(args)
 
+    # --- collect input files ---
+    input_files = []
+
+    if parsed_args.input:
+        input_files.extend(parsed_args.input)
+
+    if parsed_args.input_list:
+        with open(parsed_args.input_list, "r") as f:
+            input_files.extend(line.strip() for line in f if line.strip())
+
+    if parsed_args.input_dir:
+        import glob
+        patterns = [parsed_args.glob] if parsed_args.glob else ["*.tif", "*.png"]
+        for pat in patterns:
+            input_files.extend(glob.glob(os.path.join(parsed_args.input_dir, pat)))
+
+    if not input_files:
+        parser.error("No input files provided. Use --input, --input-list, or --input-dir.")
+
+    # --- run prediction ---
     progress_callback = make_progress_callback(log_fn=logger.info)
     cli_stop_event = Event()
 
     try:
         task = PredictionTask(
-            input_files=parsed_args.input,
+            input_files=input_files,
             output_dir=parsed_args.output,
             microscope_number=parsed_args.microscope,
             use_local=parsed_args.local,
