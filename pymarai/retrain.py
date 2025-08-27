@@ -18,21 +18,20 @@ logger = logging.getLogger(__name__)
 
 # scan a directory for *.v files and match them with *.rdf using the same basename
 def collect_pairs_from_dir(data_dir: str) -> List[Tuple[str, str]]:
-
     if not os.path.isdir(data_dir):
         raise ValueError(f"--data-dir {data_dir} is not a directory.")
 
     # index all .rdf files by basename for fast lookup
     rdf_index: Dict[str, str] = {}
     for name in os.listdir(data_dir):
-        if name.lower().endswith(".rdf"):
+        if name.endswith(".rdf"):  # strict match, case-sensitive
             base = os.path.splitext(name)[0]
             rdf_index[base] = os.path.abspath(os.path.join(data_dir, name))
 
     pairs: List[Tuple[str, str]] = []
     missing = 0
     for name in os.listdir(data_dir):
-        if name.lower().endswith(".v"):
+        if name.endswith(".v"):  # strict match, case-sensitive
             base = os.path.splitext(name)[0]
             v_path = os.path.abspath(os.path.join(data_dir, name))
             rdf_path = rdf_index.get(base)
@@ -41,11 +40,17 @@ def collect_pairs_from_dir(data_dir: str) -> List[Tuple[str, str]]:
             else:
                 missing += 1
                 logger.warning(f"Missing matching .rdf for {v_path}")
+                # debug info
+                logger.debug(f"Expected basename: '{base}'")
+                logger.debug(f"Available .rdf basenames: {list(rdf_index.keys())[:5]} ... "
+                             f"(total {len(rdf_index)})")
 
     # sort for deterministic ordering
     pairs.sort(key=lambda t: t[0])
-    logger.info(f"Found {len(pairs)} matching .v/.rdf pairs in {data_dir}"
-                + (f" ({missing} without .rdf)" if missing else ""))
+    logger.info(
+        f"Found {len(pairs)} matching .v/.rdf pairs in {data_dir}"
+        + (f" ({missing} without .rdf)" if missing else "")
+    )
 
     return pairs
 
@@ -166,7 +171,7 @@ def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
     progress_callback = make_progress_callback(progress_pipe_connection, gui_log_fn)
 
     try:
-        hostname, _ = AppConfig().get_best_available_host()
+        hostname, _ = AppConfig().get_best_available_host(username, password, ssh_keys)
         if not hostname:
             raise RuntimeError("No available host found.")
 
@@ -184,29 +189,16 @@ def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
         gpu_ids = params.get("gpu_ids") or [0, 1, 2, 3]
         folds = params.get("folds") or [0, 1, 2, 3, 4]
 
-        # collect training data
-        input_files = params.get("input_files", [])
-        rdf_pairs = []
+        # collect training data from directory (same as CLI)
+        data_dir = os.path.abspath(params.get("data_dir", ""))
+        if not data_dir:
+            raise RuntimeError("Missing required parameter: data_dir")
 
-        gui_log_fn(f"Collecting .v/.rdf pairs from selected input files ({len(input_files)}).")
-        abs_files = [os.path.abspath(f) for f in input_files]
-
-        # index rdf files by basename
-        rdf_index = {
-            os.path.splitext(os.path.basename(f))[0]: f
-            for f in abs_files if f.lower().endswith(".rdf")
-        }
-        for f in abs_files:
-            if f.lower().endswith(".v"):
-                base = os.path.splitext(os.path.basename(f))[0]
-                rdf_path = rdf_index.get(base)
-                if rdf_path and os.path.isfile(rdf_path):
-                    rdf_pairs.append((f, rdf_path))
-                else:
-                    gui_log_fn(f"[WARNING] Missing matching .rdf for {f}")
+        gui_log_fn(f"Collecting .v/.rdf pairs from directory {data_dir}.")
+        rdf_pairs = collect_pairs_from_dir(data_dir)
 
         if not rdf_pairs:
-            raise RuntimeError("No matching .v/.rdf pairs found for training.")
+            raise RuntimeError(f"No matching .v/.rdf pairs found in {data_dir}.")
 
         gui_log_fn(f"Performing training on {hostname} using GPUs {gpu_ids} and folds {folds}")
 
