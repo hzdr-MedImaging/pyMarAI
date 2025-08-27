@@ -19,8 +19,8 @@ utils:
 
 scripts:
   preprocess_script: "/pet/projekte/ai/delineation/spheroids/summerStudent/ecat/retrain/process.sh"
-  create_dataset_script: "/opt/marai/scripts/createDataset.sh"
-  custom_split_script: "/opt/marai/scripts/custom_split.py"
+  create_dataset_script: "/pet/projekte/ai/delineation/spheroids/nnUnet/raw/createDataset.sh"
+  custom_split_script: "/pet/projekte/ai/delineation/spheroids/summerStudent/ecat/retrain/custom_split.py"
 
 nnunet:
   env: "nnunet-spheroids"
