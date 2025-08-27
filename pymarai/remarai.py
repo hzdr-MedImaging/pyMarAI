@@ -1,8 +1,10 @@
 import json
 import os
 import shlex
+import subprocess
 import threading
 import logging
+from sys import platform
 from typing import List, Tuple, Optional
 
 from marai import MarAiRemote
@@ -58,6 +60,40 @@ class MarAiRemoteRetrain(MarAiRemote):
         if missing:
             raise ValueError(f"[ERROR] Missing retrain config keys: {', '.join(missing)}")
 
+    def _exec_local(self, cmd: str, stream_output: bool = False) -> int:
+
+        if isinstance(cmd, list):
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                env=os.environ.copy()
+            )
+        else:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                env=os.environ.copy(),
+                shell=True,
+                executable="/bin/bash" if platform.system() != "Windows" else None
+            )
+
+        if stream_output:
+            for line in process.stdout:
+                print(line, end="")
+        else:
+            output, _ = process.communicate()
+            print(output)
+
+        exit_status = process.wait()
+        if exit_status != 0:
+            raise RuntimeError(f"[ERROR] Command failed with exit status {exit_status}: {cmd}")
+
+        return exit_status
+
     # run a remote command via SSH and optionally stream output
     def _exec_remote(self, cmd: str, stream_output: bool = False) -> int:
         self.connect()
@@ -71,34 +107,34 @@ class MarAiRemoteRetrain(MarAiRemote):
             for line in iter(stderr.readline, ""):
                 print(line, end="")
         else:
-            output = stdout.read().decode() + stderr.read().decode()
+            output = stdout.read().decode("utf-8") + stderr.read().decode("utf-8")
             print(output)
 
         return stdout.channel.recv_exit_status()
 
     # prepare training data
     # rdf_pairs: list of tuples (mic_img_v_path, rdf_path) — local absolute paths
-    # produces *_roi.v via thrass, then symlinks them into training staging dir.
+    # produces *_roi.v via thrass, then symlinks them into training staging dir.id
     def prepare_training_data(self, rdf_pairs, progress_callback=None):
         self.connect()
 
         original_dir = os.path.dirname(os.path.abspath(rdf_pairs[0][0]))
         retrain_dir = os.path.join(original_dir, "retrain")
-        self._exec_remote(f"mkdir -p {shlex.quote(retrain_dir)}")
+        self._exec_local(f"mkdir -p {shlex.quote(retrain_dir)}")
 
         # symlink inputs
         for v, rdf in rdf_pairs:
             base = os.path.splitext(os.path.basename(v))[0]
             v_link = os.path.join(retrain_dir, f"{base}_img.v")
             rdf_link = os.path.join(retrain_dir, f"{base}_img.rdf")
-            self._exec_remote(f"ln -sf {shlex.quote(v)} {shlex.quote(v_link)}")
-            self._exec_remote(f"ln -sf {shlex.quote(rdf)} {shlex.quote(rdf_link)}")
+            self._exec_local(f"ln -sf {shlex.quote(v)} {shlex.quote(v_link)}")
+            self._exec_local(f"ln -sf {shlex.quote(rdf)} {shlex.quote(rdf_link)}")
 
         if progress_callback:
             progress_callback(0, 0, "symlinking", "rdf_to_masks")
 
         # produce *_roi.v via thrass
-        self._exec_remote(f"cd {shlex.quote(retrain_dir)} && bash {shlex.quote(self.preprocess_script)}")
+        self._exec_local(f"cd {shlex.quote(retrain_dir)} && bash {shlex.quote(self.preprocess_script)}")
 
         if progress_callback:
             progress_callback(0, 0, "thrass", "rdf_to_masks")
@@ -108,7 +144,7 @@ class MarAiRemoteRetrain(MarAiRemote):
             f"cd {shlex.quote(self.training_staging_dir)} && "
             f"ln -sf {shlex.quote(retrain_dir)}/*_img.v {shlex.quote(retrain_dir)}/*_roi.v ."
         )
-        self._exec_remote(symlink_cmd)
+        self._exec_local(symlink_cmd)
 
         if progress_callback:
             progress_callback(0, 0, self.training_staging_dir, "linked_training")
@@ -122,7 +158,7 @@ class MarAiRemoteRetrain(MarAiRemote):
 
         cmd = f"cd {shlex.quote(self.dataset_workdir)} && {shlex.quote(self.create_dataset_script)} {ds} {desc}"
 
-        self._exec_remote(cmd, stream_output=True)
+        self._exec_local(cmd, stream_output=True)
 
         if progress_callback:
             progress_callback(0, 0, f"Dataset {ds}", "dataset_created")
@@ -238,13 +274,13 @@ class MarAiRemoteRetrain(MarAiRemote):
             # full pipeline
             self.prepare_training_data(rdf_pairs, progress_callback=progress_callback)
             self.create_dataset(dataset_id, description, progress_callback=progress_callback)
-            self.preprocess_dataset(dataset_id, progress_callback=progress_callback)
-            self.create_custom_split(dataset_id, description, progress_callback=progress_callback)
-            self.train_folds(
+            #self.preprocess_dataset(dataset_id, progress_callback=progress_callback)
+            #self.create_custom_split(dataset_id, description, progress_callback=progress_callback)
+            """self.train_folds(
                 dataset_id,
                 folds or [0, 1, 2, 3, 4],
                 gpu_ids or [0, 1, 2, 3],
                 progress_callback=progress_callback
-            )
+            )"""
         finally:
             self.disconnect()
