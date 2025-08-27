@@ -1693,14 +1693,14 @@ class PyMarAiGuiApp(QMainWindow):
             self.predictionButton.setText("Run Prediction")
             self.predictionButton.setEnabled(True)  # re-enable after prediction finishes or stops
 
-        # switching between two states of elements for re-training and user interaction mode
-        def switchElementsToRetrain(self, isRetrain):
-            if isPrediction:
-                self.retrainButton.setText("Stop")
-                self.retrainButton.setEnabled(True)
-            else:
-                self.retrainButton.setText("Run Re-training")
-                self.pretrainButton.setEnabled(True)
+    # switching between two states of elements for re-training and user interaction mode
+    def switchElementsToRetrain(self, isRetrain):
+        if isRetrain:
+            self.retrainButton.setText("Stop")
+            self.retrainButton.setEnabled(True)
+        else:
+            self.retrainButton.setText("Run Re-training")
+            self.retrainButton.setEnabled(True)
 
     def openMultipleFilesInRover(self, selected_filenames):
         output_dir = self.hiddenOutputDir
@@ -2410,10 +2410,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.enableWidgets(True)
         self.retrainProgressBar.hide()
         self.retrainProgressBarLabel.hide()
-        self.updateRetrainOutputBasenames()
-        self.markRetrainedFiles()
         self.switchElementsToRetrain(False)
-        self.updateRetrainPreviewLabel()
 
     def updatePreviewLabel(self):
         if self.current_preview_filename:
