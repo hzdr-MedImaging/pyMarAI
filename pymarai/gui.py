@@ -2566,14 +2566,12 @@ class PyMarAiGuiApp(QMainWindow):
 
     def retrainButtonPressed(self):
         if not self.processingRetrainRunning:
-            selected_items = self.retrainInputFileListWidget.selectedItems()
-            if not selected_items:
-                self.update_retrain_progress_text_signal.emit("No files selected for retraining.\n")
+            data_dir = getattr(self, "selectedRetrainInputDirectory", None)
+            if not data_dir or not os.path.isdir(data_dir):
+                self.update_retrain_progress_text_signal.emit("No directory selected for retraining.\n")
                 return
 
-            input_files = [self.cleanFilename(item.text()) for item in selected_items]
-
-            retrain_params = self.getRetrainParams(input_files)
+            retrain_params = self.getRetrainParams(data_dir)
             if retrain_params is None:
                 return
 
@@ -2634,9 +2632,9 @@ class PyMarAiGuiApp(QMainWindow):
                 self.retrainThread.stop_retrain_process()
                 self.switchElementsToRetrain(False)
 
-    def getRetrainParams(self, input_files):
-        if not input_files:
-            self.update_retrain_progress_text_signal.emit("[ERROR] No input files for retraining.\n")
+    def getRetrainParams(self, data_dir: str):
+        if not data_dir or not os.path.isdir(data_dir):
+            self.update_retrain_progress_text_signal.emit("[ERROR] No valid directory selected for retraining.\n")
             return None
 
         # dataset metadata
@@ -2653,17 +2651,13 @@ class PyMarAiGuiApp(QMainWindow):
             dataset_description = "GUI_retraining_session"
 
         # log info
-        filenames_to_log = [os.path.basename(f) for f in input_files]
-        log_message = ", ".join(filenames_to_log)
+        log_message = f"Retraining with data from directory: {data_dir}"
         self.update_retrain_progress_text_signal.emit(
-            f"Running retraining with {len(input_files)} file(s).\n"
-            f"Input files: {log_message}\n"
-            f"Dataset ID: {dataset_id}\n"
-            f"Description: {dataset_description}\n"
+            f"{log_message}\nDataset ID: {dataset_id}\nDescription: {dataset_description}\n"
         )
 
         return {
-            "input_files": input_files,
+            "data_dir": os.path.abspath(data_dir),
             "dataset_id": int(dataset_id),
             "description": dataset_description
         }
