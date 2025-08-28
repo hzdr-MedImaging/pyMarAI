@@ -55,6 +55,7 @@ class AppConfig(metaclass=Singleton):
         self.nnunet = self.config.get("nnunet", {})
         self.scripts = self.config.get("scripts", {})
         self.retrain = self.config.get("retrain", {})
+        self.expert_mode = False
 
     def get_microscopes(self):
         return self.microscopes
@@ -76,6 +77,12 @@ class AppConfig(metaclass=Singleton):
 
     def get_retrain(self):
         return self.retrain
+
+    def get_expert_mode(self):
+        return self.expert_mode
+
+    def set_expert_mode(self, mode):
+        self.expert_mode = mode
 
     # dynamically choose the first available machine based on CPU/GPU load
     def get_best_available_host(self, username, password=None, ssh_keys=[]) -> Tuple[Optional[str], Optional[str]]:

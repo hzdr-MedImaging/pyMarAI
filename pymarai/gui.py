@@ -7,6 +7,7 @@ import datetime
 import filecmp
 import sys
 import os
+import argparse
 import subprocess
 import multiprocessing
 import logging
@@ -102,7 +103,8 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrain_tab = QWidget()
 
         self.tab_widget.addTab(self.prediction_tab, "Prediction")
-        self.tab_widget.addTab(self.retrain_tab, "Re-training")
+        if self.config.get_expert_mode():
+            self.tab_widget.addTab(self.retrain_tab, "Re-training")
 
         self.tab_widget.currentChanged.connect(self.onTabChanged)
 
@@ -3217,18 +3219,35 @@ class ScaledLabel(QLabel):
             self._offset.setY(max(min(self._offset.y(), max_y), min_y))
 
 # main function to start GUI
-def main():
+def main(args=None):
+    class ArgParser(argparse.ArgumentParser):
+        def error(self, message):
+            sys.stderr.write(f"ERROR: {message}\n\n")
+            self.print_help()
+            sys.exit(1)
+
+    parser = ArgParser(
+        prog="pymarai",
+        description='Start the PyMarAI spheroid delineation user interface',
+        add_help=True
+    )
+
+    # --- other options ---
+    parser.add_argument("-e", "--expert", action="store_true", help="Start in expert mode with re-training interface enabled")
+    parsed_args = parser.parse_args(args)
+
+    # load + init config
+    config = AppConfig()
+    config.set_expert_mode(parsed_args.expert)
+
     QCoreApplication.setApplicationVersion(__version__);
     QCoreApplication.setOrganizationName("Helmholtz-Zentrum Dresden-Rossendorf");
     QCoreApplication.setOrganizationDomain("hzdr.de");
     QCoreApplication.setApplicationName("PyMarAI");
     app = QApplication(sys.argv)
-    config = AppConfig()
     window = PyMarAiGuiApp(config)
     window.show()
     sys.exit(app.exec_())
 
-if __name__ == '__main__':
-    multiprocessing.freeze_support()
+if __name__ == "__main__":
     main()
-

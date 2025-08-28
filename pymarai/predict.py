@@ -200,7 +200,7 @@ def main(args=None):
             sys.exit(1)
 
     parser = ArgParser(
-        prog="marai-predict",
+        prog="pymarai-predict",
         description='Start prediction (inference) for microscopic images of spheroids',
         add_help=True
     )

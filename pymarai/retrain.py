@@ -233,7 +233,7 @@ def gui_entry_point(params: dict, username: str, password: str, ssh_keys: list,
 # --- CLI entry point ---
 def main(args=None):
     parser = argparse.ArgumentParser(
-        prog="marai-retrain",
+        prog="pymarai-retrain",
         description="Run end-to-end (re-)training on a remote GPU node."
     )
     parser.add_argument("--host", required=True, help="Remote hostname")

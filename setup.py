@@ -76,6 +76,8 @@ setup(
     entry_points={
         'console_scripts': [
             'pymarai=pymarai.gui:main',
+            'pymarai-predict=pymarai.predict:main',
+            'pymarai-retrain=pymarai.retrain:main',
         ],
     },
 )
