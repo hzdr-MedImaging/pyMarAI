@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog
                              QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget, QFormLayout,
                              QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
 
-from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QTransform
+from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
 from PIL import Image, ImageOps
 
@@ -877,7 +877,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # update the text of the zoom_percent_label with the new percentage
     def setZoomPercentageLabel(self, zoom_factor):
-        percentage = int(zoom_factor * 100)
+        percentage = int(zoom_factor * 100.0)
         self.zoom_percent_label.setText(f"{percentage}%")
 
     # opens a dialog to select the input directory for predictions
@@ -3116,7 +3116,6 @@ class ScaledLabel(QLabel):
 
     def setPixmap(self, pixmap):
         self._pixmap = pixmap
-        self._offset = QtCore.QPoint(0, 0)
         self.updatePixmap()
 
     def setZoom(self, zoom_factor, cursor_pos=None):
@@ -3147,23 +3146,17 @@ class ScaledLabel(QLabel):
         return self.zoom_factor
 
     def zoomIn(self):
-        self.setZoom(self.zoom_factor * 1.25)
+        self.setZoom(self.zoom_factor + 0.1)
 
     def zoomOut(self):
-        self.setZoom(self.zoom_factor / 1.25)
+        self.setZoom(self.zoom_factor - 0.1)
 
     def updatePixmap(self):
         if self._pixmap is not None:
-            base = self._pixmap.scaled(
-                self.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+            self._scaled_pixmap = self._pixmap.scaled(
+                int(self.width() * self.zoom_factor), int(self.height() * self.zoom_factor),
+                Qt.KeepAspectRatio
             )
-
-            transform = QTransform()
-            transform.scale(self.zoom_factor, self.zoom_factor)
-
-            self._scaled_pixmap = base.transformed(transform, Qt.SmoothTransformation)
 
             self._clampOffset()
 
@@ -3200,9 +3193,9 @@ class ScaledLabel(QLabel):
         if not self._pixmap:
             return
         if event.angleDelta().y() > 0:
-            self.setZoom(self.zoom_factor * 1.1, cursor_pos=event.pos())
+            self.setZoom(self.zoom_factor + 0.1, cursor_pos=event.pos())
         else:
-            self.setZoom(self.zoom_factor / 1.1, cursor_pos=event.pos())
+            self.setZoom(self.zoom_factor - 0.1, cursor_pos=event.pos())
 
     # --- Helpers ---
     def _clampOffset(self):
