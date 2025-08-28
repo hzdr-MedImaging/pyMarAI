@@ -1,3 +1,8 @@
+import pymarai.login
+import pymarai.predict
+import pymarai.retrain
+from pymarai.__init__ import __version__
+
 import datetime
 import filecmp
 import sys
@@ -13,11 +18,6 @@ import csv
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-
-import pymarai.login
-import pymarai.predict
-import pymarai.retrain
-from pymarai.__init__ import __version__
 
 from PyQt5 import QtCore
 from multiprocessing import Pipe

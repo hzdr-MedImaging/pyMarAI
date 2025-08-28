@@ -6,7 +6,7 @@ import platform
 from typing import List, Tuple, Optional, Dict
 
 from pymarai.config import AppConfig
-from remarai import MarAiRemoteRetrain
+from pymarai.remarai import MarAiRemoteRetrain
 
 from multiprocessing import Event
 from multiprocessing.connection import Connection

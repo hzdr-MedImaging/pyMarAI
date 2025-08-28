@@ -7,7 +7,7 @@ import logging
 from sys import platform
 from typing import List, Tuple, Optional
 
-from marai import MarAiRemote
+from pymarai.marai import MarAiRemote
 from pymarai.config import AppConfig
 
 logger = logging.getLogger(__name__)
