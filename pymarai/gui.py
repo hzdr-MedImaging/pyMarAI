@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog
                              QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget, QFormLayout,
                              QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
 
-from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter
+from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QCursor
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
 from PIL import Image, ImageOps
 
@@ -3142,6 +3142,11 @@ class ScaledLabel(QLabel):
         else:
             self.updatePixmap()
 
+        if self.zoom_factor > 1.0:
+            self.setCursor(QCursor(QtCore.Qt.OpenHandCursor))
+        else:
+            self.setCursor(QCursor(QtCore.Qt.ArrowCursor))
+
         self.zoom_changed_signal.emit(self.zoom_factor)
 
     def getZoom(self):
@@ -3177,6 +3182,7 @@ class ScaledLabel(QLabel):
         if event.button() == Qt.LeftButton and self.zoom_factor > 1.0:
             self._dragging = True
             self._last_pos = event.pos()
+            self.setCursor(QCursor(QtCore.Qt.ClosedHandCursor))
 
     def mouseMoveEvent(self, event):
         if self._dragging and self._scaled_pixmap:
@@ -3189,6 +3195,10 @@ class ScaledLabel(QLabel):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._dragging = False
+            if self.zoom_factor > 1.0:
+                self.setCursor(QCursor(QtCore.Qt.OpenHandCursor))
+            else:
+                self.setCursor(QCursor(QtCore.Qt.ArrowCursor))
 
     # --- Zoom with mouse wheel ---
     def wheelEvent(self, event):
