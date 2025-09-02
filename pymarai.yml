@@ -36,61 +36,61 @@ retrain:
   dataset_workdir: "/pet/projekte/ai/delineation/spheroids/nnUnet/raw"
 
 machines:
-  saturn:
-      ip: 149.220.74.18
-      type: cpu
-      cpu_threshold: 1
   vega:
-      ip: 149.220.74.70
+      ip: 192.168.128.70
       type: gpu
       cpu_threshold: 40
       gpu_threshold: 10
   lyra:
-      ip: 149.220.74.204
+      ip: 192.168.128.204
       type: gpu
       cpu_threshold: 60
       gpu_threshold: 10
   atlas:
-      ip: 149.220.74.144
+      ip: 192.168.128.144
       type: cpu
       cpu_threshold: 40
   janus:
-      ip: 149.220.74.146
+      ip: 192.168.128.146
       type: cpu
       cpu_threshold: 40
   hati:
-      ip: 149.220.74.154
+      ip: 192.168.128.154
       type: cpu
       cpu_threshold: 40
   kari:
-      ip: 149.220.74.156
+      ip: 192.168.128.156
       type: cpu
       cpu_threshold: 40
   anthe:
-      ip: 149.220.74.158
+      ip: 192.168.128.158
       type: cpu
       cpu_threshold: 40
   pan:
-      ip: 149.220.74.161
+      ip: 192.168.128.161
       type: cpu
       cpu_threshold: 40
   orcus:
-      ip: 149.220.74.136
+      ip: 192.168.128.136
       type: cpu
       cpu_threshold: 40
   proteus:
-      ip: 149.220.74.142
+      ip: 192.168.128.142
       type: cpu
       cpu_threshold: 40
   narvi:
-      ip: 149.220.74.148
+      ip: 192.168.128.148
       type: cpu
       cpu_threshold: 40
   jupiter:
-      ip: 149.220.74.134
+      ip: 192.168.128.134
       type: cpu
       cpu_threshold: 30
   neptun:
-      ip: 149.220.74.63
+      ip: 192.168.128.63
       type: cpu
       cpu_threshold: 40
+  saturn:
+      ip: 192.168.128.18
+      type: cpu
+      cpu_threshold: 1
