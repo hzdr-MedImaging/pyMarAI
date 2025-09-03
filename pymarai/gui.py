@@ -17,6 +17,7 @@ import time
 import cv2
 import csv
 import re
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -73,7 +74,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.statusWorker = None
         self.processingRunning = False
         self.processingRetrainRunning = False
-        self.outputBasenames = set()
 
         self.file_status = {}  # stores "good", "bad", or None
 
@@ -741,13 +741,12 @@ class PyMarAiGuiApp(QMainWindow):
     def findAndSetMicroscopeFromAnalyzedFile(self, input_filename):
         basename = os.path.splitext(input_filename)[0]
 
+        pattern = re.compile(r"_m(\d+)")
         if os.path.isdir(self.hiddenOutputDir):
             for filename in os.listdir(self.hiddenOutputDir):
                 if basename in filename and filename.endswith('.v') and '_cnn' not in filename:
 
-                    pattern = re.compile(r"_m(\d+)")
                     match = pattern.search(filename)
-
                     if match:
                         microscope_number = match.group(1)
 
@@ -824,19 +823,6 @@ class PyMarAiGuiApp(QMainWindow):
                 else:
                     self.applyRetrainMask()
 
-    # updates the set of basenames for analyzed files in the output directory
-    def updateOutputBasenames(self):
-        self.outputBasenames = set()
-        output_dir = self.hiddenOutputDir
-        if os.path.isdir(output_dir):
-            for f in os.listdir(output_dir):
-                fp = os.path.join(output_dir, f)
-                if not os.path.isfile(fp):
-                    continue
-                base_no_ext = os.path.splitext(f)[0]
-                base_without_status, _ = self.parseStatusFromFilename(base_no_ext)
-                self.outputBasenames.add(base_without_status)
-
     # marks files in the input list that have already been analyzed
     def markAnalyzedFiles(self):
         output_dir = self.hiddenOutputDir
@@ -847,35 +833,30 @@ class PyMarAiGuiApp(QMainWindow):
 
         self.statusWorker = FileStatusWorker(
             input_items=items,
-            output_dir=output_dir,
-            parse_status_func=self.parseStatusFromFilename,
-            strip_microscope_tag_func=self.stripMicroscopeTag
+            output_dir=output_dir
         )
 
-        def apply_batch(batch):
-            for row, text, color, status_found in batch:
-                item = self.inputFileListWidget.item(row)
-                full_path = item.data(Qt.UserRole)
-                self.file_status[full_path] = status_found
-                item.setText(text)
-                item.setForeground(QBrush(color))
+        def finish(batch):
+            if batch:
+              for item, text, color, status_found in batch:
+                  full_path = item.data(Qt.UserRole)
+                  self.file_status[full_path] = status_found
+                  item.setText(text)
+                  item.setForeground(QBrush(color))
 
-        def finish():
             self.inputFileListWidget.setUpdatesEnabled(True)
             if self.inputFileListWidget.selectedItems():
                 self.updatePreviewList()
 
-        self.statusWorker.batch_ready.connect(apply_batch)
+            self.setProgressBarText()
+
         self.statusWorker.finished_all.connect(finish)
+        self.setProgressBarText("Checking delineation status...")
         self.statusWorker.start()
 
     # removes the suffix from a filename string
     def cleanFilename(self, text):
         return text.split(" [")[0].strip()
-
-    # removes _m<number> from the end of filename (before extension)
-    def stripMicroscopeTag(self, filename):
-        return re.sub(r"_m\d+$", "", filename)
 
     # update the text of the zoom_percent_label with the new percentage
     def setZoomPercentageLabel(self, zoom_factor):
@@ -891,7 +872,6 @@ class PyMarAiGuiApp(QMainWindow):
             self.loadFilesFromDirectory(dir_path)
             self.hiddenOutputDir = os.path.join(dir_path, f".pymarai-{os.getlogin()}")
             self.updatePreviewList()
-            self.updateOutputBasenames()
 
             # opens a dialog to select the input directory for re-training
     def loadRetrainInputDirectory(self):
@@ -950,9 +930,6 @@ class PyMarAiGuiApp(QMainWindow):
             item.setData(Qt.UserRole, full_path)
             self.inputFileListWidget.addItem(item)
 
-        self.updateOutputBasenames()
-        self.markAnalyzedFiles()
-
         if file_list:
             self.previewList = []
             self.previewIndex = 0
@@ -1006,7 +983,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.setProgressBarText()
         self.enableWidgets(True)
         self.predictionButton.setEnabled(True)
-        self.updateOutputBasenames()
         self.markAnalyzedFiles()
 
     # callback when re-training file loading is finished
@@ -2056,34 +2032,27 @@ class PyMarAiGuiApp(QMainWindow):
             return
 
         renamed = []
-        for fname in os.listdir(output_dir):
-            fp = os.path.join(output_dir, fname)
-            if not os.path.isfile(fp):
-                continue
-            ext = os.path.splitext(fname)[1]
+        for old_path in glob.glob(os.path.join(output_dir, f"{base_input}_m*")):
+            dirname, old_name = os.path.split(old_path)
+            fname, ext = os.path.splitext(re.sub(r"_(GOOD|BAD)", '', old_name))
             if ext.lower() not in ('.v', '.rdf'):
                 continue
 
-            file_base_with_status = os.path.splitext(fname)[0]
-            file_base = file_base_with_status.removesuffix('_BAD').removesuffix('_GOOD')
-
-            if file_base.startswith(base_input):
-                new_base = f"{file_base}_GOOD"
-                new_fname = new_base + ext
-                new_fp = os.path.join(output_dir, new_fname)
-                try:
-                    # overwrite if destination exists
-                    os.replace(fp, new_fp)
-                    renamed.append((fname, new_fname))
-                except Exception as e:
-                    self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
+            new_fname = fname + "_GOOD" + ext
+            new_path = os.path.join(dirname, new_fname)
+            if old_path != new_path:
+              try:
+                  # overwrite if destination exists
+                  os.replace(old_path, new_path)
+                  renamed.append((fname, new_fname))
+              except Exception as e:
+                  self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
 
         if not renamed:
             self.update_progress_text_signal.emit(
-                f"[ERROR] No output mask files found to mark for {self.current_preview_filename}\n")
+                f"[WARNING] {base_input} already marked as GOOD\n")
         else:
             self.file_status[self.current_preview_filename] = "GOOD"
-            self.updateOutputBasenames()
             self.updateFileStatusInList(self.current_preview_filename, "GOOD")
             self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as GOOD for {base_input}.\n")
 
@@ -2100,48 +2069,29 @@ class PyMarAiGuiApp(QMainWindow):
             return
 
         renamed = []
-        for fname in os.listdir(output_dir):
-            fp = os.path.join(output_dir, fname)
-            if not os.path.isfile(fp):
-                continue
-            ext = os.path.splitext(fname)[1]
+        for old_path in glob.glob(os.path.join(output_dir, f"{base_input}_m*")):
+            dirname, old_name = os.path.split(old_path)
+            fname, ext = os.path.splitext(re.sub(r"_(GOOD|BAD)", '', old_name))
             if ext.lower() not in ('.v', '.rdf'):
                 continue
 
-            file_base_with_status = os.path.splitext(fname)[0]
-            file_base = file_base_with_status.removesuffix('_BAD').removesuffix('_GOOD')
-
-            if file_base.startswith(base_input):
-                new_base = f"{file_base}_BAD"
-                new_fname = new_base + ext
-                new_fp = os.path.join(output_dir, new_fname)
-                try:
-                    os.replace(fp, new_fp)
-                    renamed.append((fname, new_fname))
-                except Exception as e:
-                    self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
+            new_fname = fname + "_BAD" + ext
+            new_path = os.path.join(dirname, new_fname)
+            if old_path != new_path:
+              try:
+                  # overwrite if destination exists
+                  os.replace(old_path, new_path)
+                  renamed.append((fname, new_fname))
+              except Exception as e:
+                  self.update_progress_text_signal.emit(f"[ERROR] Failed to rename {fp} -> {new_fp}: {e}\n")
 
         if not renamed:
             self.update_progress_text_signal.emit(
-                f"[ERROR] No output mask files found to mark for {self.current_preview_filename}\n")
+                f"[WARNING] {base_input} already marked as BAD\n")
         else:
             self.file_status[self.current_preview_filename] = "BAD"
-            self.updateOutputBasenames()
             self.updateFileStatusInList(self.current_preview_filename, "BAD")
             self.showProgressMessage(f"[INFO] Marked {len(renamed)} output file(s) as BAD for {base_input}.\n")
-
-    # extract status from filename suffix like _m1_GOOD, _m2_BAD etc
-    def parseStatusFromFilename(self, filename):
-        match = re.search(r'(_m\d+)?_(GOOD|BAD)$', filename, re.IGNORECASE)
-
-        if match:
-            base = filename[:match.start()]
-            status = match.group(2).upper()
-            return base, status
-
-        filename = re.sub(r'_m\d+$', '', filename, flags=re.IGNORECASE)
-
-        return filename, None
 
     def updateFileStatusInList(self, full_path: str, forced_status: str = None) -> None:
         # use the full path to get the original filename and extension
@@ -2158,20 +2108,22 @@ class PyMarAiGuiApp(QMainWindow):
             # match the item using the full path stored in its data
             if item.data(Qt.UserRole) == full_path:
                 if status:
-                    item.setText(f"{base_name}{extension} [{status}]")
+                    item.setText(re.sub(r" \[(GOOD|BAD|TO DO)\]", f" [{status}]", item.text()))
                     if status == "GOOD":
                         item.setForeground(QBrush(QColor("green")))
                     elif status == "BAD":
                         item.setForeground(QBrush(QColor("red")))
+                    elif status == "TO DO":
+                        item.setForeground(QBrush(QColor("orange")))
                     else:
-                        item.setForeground(QBrush(QColor("#A9A9A9")))
+                        item.setForeground(QBrush(QColor("black")))
                 else:
                     # if no status, show the original filename with extension
                     item.setText(original_filename)
                     item.setForeground(Qt.black)
-                break
 
-        self.markAnalyzedFiles()
+                # found it, break out
+                break
 
     # select all files marked as GOOD in the list
     def selectAllGoodFiles(self):
@@ -2395,7 +2347,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.enableWidgets(True)
         self.progressBar.hide()
         self.progressBarLabel.hide()
-        self.updateOutputBasenames()
         self.markAnalyzedFiles()
         self.switchElementsToPrediction(False)
         self.updatePreviewLabel()
@@ -2452,6 +2403,7 @@ class PyMarAiGuiApp(QMainWindow):
             # find matching _mN files in corrections
             pattern = re.compile(rf"^{re.escape(base_name)}_m\d+\.rdf")
             rdf_corr_candidates = [f for f in os.listdir(correction_dir) if pattern.match(f)]
+            modified = False
             if rdf_corr_candidates:
                 for rdf_corr_file in rdf_corr_candidates:
                     rdf_corr_path = os.path.join(correction_dir, rdf_corr_file)
@@ -2554,14 +2506,13 @@ class PyMarAiGuiApp(QMainWindow):
                         f"[INFO] Updated {new_rdf_name} and {new_cnn_name} → {self.hiddenOutputDir}\n"
                     )
 
-            else:
-                self.update_progress_text_signal.emit(
-                    f"[INFO] No corrections RDF for {self.current_preview_filename}\n")
+                    modified = True
 
-            # refresh mask visualization for current preview
-            self.updatePreviewLabel()
-            self.markAnalyzedFiles()
-            self.update_progress_text_signal.emit("[INFO] Mask visualization refreshed.\n")
+            if modified:
+                # refresh mask visualization for current preview
+                self.updatePreviewLabel()
+                self.markAnalyzedFiles()
+                self.update_progress_text_signal.emit("[INFO] Mask visualization refreshed.\n")
 
         except Exception as e:
             self.update_progress_text_signal.emit(f"[ERROR] refresh_mask failed: {e}\n")
@@ -3032,74 +2983,63 @@ class FileLoaderWorker(QThread):
 
 
 class FileStatusWorker(QThread):
-    batch_ready = pyqtSignal(list)  # list of (row, text, color, status)
-    finished_all = pyqtSignal()
+    finished_all = pyqtSignal(list) # list of (item, text, color, status)
 
-    def __init__(self, input_items, output_dir, parse_status_func, strip_microscope_tag_func, parent=None):
+    def __init__(self, input_items, output_dir, parent=None):
         super().__init__(parent)
         self.input_items = input_items
         self.output_dir = output_dir
-        self.parse_status_func = parse_status_func
-        self.strip_microscope_tag_func = strip_microscope_tag_func
 
     def run(self):
         batch = []
 
         # pre-list all output files once
-        output_files = os.listdir(self.output_dir) if os.path.isdir(self.output_dir) else []
+        if os.path.isdir(self.output_dir):
+            output_files = [os.path.basename(x) for x in glob.glob(os.path.join(self.output_dir, f"*_m*.rdf"))]
+        else:
+            output_files = []
 
         for row, item in enumerate(self.input_items):
             full_path = item.data(Qt.UserRole)
-            base_name = os.path.splitext(os.path.basename(full_path))[0]
-            base_name = self.strip_microscope_tag_func(base_name)
-
-            # count rdf files that start with basename
-            mod_count = sum(
-                1 for f in output_files
-                if f.startswith(base_name) and f.endswith(".rdf")
-            )
+            base_name, _ = os.path.splitext(os.path.basename(full_path))
 
             # detect status as before
-            status_found = None
-            color = QColor("black")
-            text = os.path.basename(full_path)
+            rdf_count = 0
+            status_found = ""
+            text = f"{os.path.basename(full_path)}"
 
+            # walk through all files in output folder and
+            # get status
             for f in output_files:
                 if f.startswith(base_name):
-                    base_no_ext = os.path.splitext(f)[0]
-                    _, status = self.parse_status_func(base_no_ext)
-                    if status:
-                        status_found = status
-                        break
-                    else:
-                        status_found = "TO DO"
+                    if status_found == "":
+                        if "_GOOD" in f:
+                            status_found = "GOOD"
+                        elif "_BAD" in f:
+                            status_found = "BAD"
+                        else:
+                            status_found = "TO DO"
+
+                    # count rdf files that start with basename
+                    rdf_count += 1
 
             if status_found:
-                text = f"{os.path.basename(full_path)} [{status_found}]"
-                if mod_count > 1:
-                    text += f" ({mod_count - 1})"
+                text += f"  [{status_found}]"
+            if rdf_count > 1:
+                text += f" ({rdf_count - 1})"
 
-                if status_found == "GOOD":
-                    color = QColor("green")
-                elif status_found == "BAD":
-                    color = QColor("red")
-                elif status_found == "TO DO":
-                    color = QColor("orange")
-                else:
-                    color = QColor("#A9A9A9")
+            if status_found == "GOOD":
+                color = QColor("green")
+            elif status_found == "BAD":
+                color = QColor("red")
+            elif status_found == "TO DO":
+                color = QColor("orange")
+            else:
+                color = QColor("black")
 
-            batch.append((row, text, color, status_found))
+            batch.append((item, text, color, status_found))
 
-            if len(batch) >= 50:
-                self.batch_ready.emit(batch)
-                batch = []
-                self.msleep(1)
-
-        if batch:
-            self.batch_ready.emit(batch)
-
-        self.finished_all.emit()
-
+        self.finished_all.emit(batch)
 
 class ScaledLabel(QLabel):
     zoom_changed_signal = pyqtSignal(float)

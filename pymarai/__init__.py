@@ -2,7 +2,7 @@ import sys
 from datetime import datetime
 import signal
 
-__version__ = '0.6.0'
+__version__ = '0.7.0'
 __copyright__ = 'Copyright (c) 2025 Varvara Melnyk, Jens Maus, www.hzdr.de'
 
 def error(*objs):
