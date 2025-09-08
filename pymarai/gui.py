@@ -26,9 +26,9 @@ from multiprocessing import Pipe
 
 from pymarai.config import AppConfig
 
-from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QTableWidgetItem, QLabel,
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QTreeWidgetItem, QLabel,
                              QProgressBar, QWidget, QTabWidget, QCheckBox, QPushButton, QSizePolicy, QPlainTextEdit, QTableWidget, QFormLayout,
-                             QLineEdit, QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow)
+                             QLineEdit, QFileDialog, QTreeWidget, QTreeWidgetItem, QMessageBox, QGroupBox, QColorDialog, QSplitter, QMainWindow, QHeaderView)
 
 from PyQt5.QtGui import QPixmap, QImage, QColor, QBrush, QPainter, QCursor
 from PyQt5.QtCore import Qt, QSettings, QThread, pyqtSignal, QThreadPool, QCoreApplication, QByteArray
@@ -138,29 +138,46 @@ class PyMarAiGuiApp(QMainWindow):
     # sets up the layout and widgets for the prediction tab
     def setupPredictionTab(self):
         # --- Input File Section ---
-        self.inputFileLabel = self.createLabel("Input folder:")
-        self.inputDirButton = self.createButton("Change Folder", self.loadInputDirectory)
+        self.inputDirLabel = self.createLabel("no directory selected")
+        self.inputDirButton = self.createButton("Folder: ", self.loadInputDirectory)
+        self.inputDirButton.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         self.selectAllButton = self.createButton("Select All", self.selectAllFiles)
         self.deselectAllButton = self.createButton("Deselect All", self.deselectAllFiles)
+        self.selectAllGoodButton = self.createButton("Select GOOD", self.selectAllGoodFiles)
+        self.selectAllBadButton = self.createButton("Select BAD", self.selectAllBadFiles)
         self.fileCountLabel = self.createLabel("No images loaded")
 
+        inputDirLayout = QHBoxLayout()
+        inputDirLayout.addWidget(self.inputDirButton)
+        inputDirLayout.addWidget(self.inputDirLabel)
+
         inputFilePathButtonsLayout = QHBoxLayout()
-        inputFilePathButtonsLayout.addWidget(self.inputDirButton)
         inputFilePathButtonsLayout.addWidget(self.selectAllButton)
         inputFilePathButtonsLayout.addWidget(self.deselectAllButton)
+        inputFilePathButtonsLayout.addWidget(self.selectAllGoodButton)
+        inputFilePathButtonsLayout.addWidget(self.selectAllBadButton)
         inputFilePathButtonsLayout.addStretch()
         inputFilePathButtonsLayout.addWidget(self.fileCountLabel)
 
-        self.inputFileListWidget = QListWidget()
-        self.inputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
-        self.inputFileListWidget.itemClicked.connect(self.refresh_mask)
-        self.inputFileListWidget.itemDoubleClicked.connect(self.openAllSelectedFilesInRover)
+        self.inputFileTreeWidget = QTreeWidget()
+        self.inputFileTreeWidget.setColumnCount(3)
+        self.inputFileTreeWidget.setHeaderLabels(['Image', 'Status', '# Changes'])
+        self.inputFileTreeWidget.sortItems(0, Qt.AscendingOrder)
+        header = self.inputFileTreeWidget.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.inputFileTreeWidget.setSortingEnabled(True)
+        self.inputFileTreeWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.inputFileTreeWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileTreeWidget.itemClicked.connect(self.refresh_mask)
+        self.inputFileTreeWidget.itemDoubleClicked.connect(self.openAllSelectedFilesInRover)
 
         inputFileSectionWidget = QWidget()
         inputFileSectionLayout = QVBoxLayout(inputFileSectionWidget)
-        inputFileSectionLayout.addWidget(self.inputFileLabel)
-        inputFileSectionLayout.addWidget(self.inputFileListWidget)
+        inputFileSectionLayout.addLayout(inputDirLayout)
+        inputFileSectionLayout.addWidget(self.inputFileTreeWidget)
         inputFileSectionLayout.addLayout(inputFilePathButtonsLayout)
 
         # --- Image Preview Section ---
@@ -174,16 +191,16 @@ class PyMarAiGuiApp(QMainWindow):
         self.imagePreviewLabel.zoom_changed_signal.connect(self.setZoomPercentageLabel)
 
         self.imageFilenameLabel = self.createLabel("No file selected")
-        self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum);
+        self.imageFilenameLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.imageFilenameLabel.setAlignment(Qt.AlignCenter)
         self.imageFilenameLabel.setMaximumHeight(18)
 
         self.prevButton = self.createButton("↑ Previous", self.showPreviousImage)
         self.nextButton = self.createButton("Next ↓", self.showNextImage)
-        self.markGoodButton = self.createButton("→ Mark as GOOD", self.markFileAsGood)
+        self.markGoodButton = self.createButton("→ Mark GOOD", self.markFileAsGood)
         self.markGoodButton.setToolTip(
             "Marks the currently selected file as GOOD result of prediction. This action can also be triggered by pushing right arrow ->.")
-        self.markBadButton = self.createButton("Mark as BAD ←", self.markFileAsBad)
+        self.markBadButton = self.createButton("Mark BAD ←", self.markFileAsBad)
         self.markBadButton.setToolTip(
             "Marks the currently selected file as BAD result of prediction. This action can also be triggered by pushing left arrow <-.")
 
@@ -239,8 +256,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.statusToolsGroup.setCheckable(True)
         self.statusToolsGroup.setChecked(True)
 
-        self.selectAllGoodButton = self.createButton("Select all GOOD", self.selectAllGoodFiles)
-        self.selectAllBadButton = self.createButton("Select all BAD", self.selectAllBadFiles)
         self.openRoverButton = self.createButton("Open in ROVER", self.openAllSelectedFilesInRover)
         self.openRoverButton.setToolTip(
             "Opens all currently selected images in the ROVER application. It can also be triggered by double-clicking the file of interest.")
@@ -253,8 +268,6 @@ class PyMarAiGuiApp(QMainWindow):
 
         statusToolsWidget = QWidget()
         statusToolsLayout = QHBoxLayout(statusToolsWidget)
-        statusToolsLayout.addWidget(self.selectAllGoodButton)
-        statusToolsLayout.addWidget(self.selectAllBadButton)
         statusToolsLayout.addWidget(self.openRoverButton)
         statusToolsLayout.addWidget(self.saveOutputButton)
         statusToolsLayout.addWidget(self.generateStatsButton)
@@ -346,15 +359,18 @@ class PyMarAiGuiApp(QMainWindow):
         retrainInputFilePathButtonsLayout.addStretch()
         retrainInputFilePathButtonsLayout.addWidget(self.retrainFileCountLabel)
 
-        self.retrainInputFileListWidget = QListWidget()
-        self.retrainInputFileListWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.retrainInputFileListWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
-        self.retrainInputFileListWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
+        self.retrainInputFileTreeWidget = QTreeWidget()
+        self.retrainInputFileTreeWidget.setSortingEnabled(True)
+        self.retrainInputFileTreeWidget.setColumnCount(2)
+        self.retrainInputFileTreeWidget.setHeaderLabels(['Image', 'Status'])
+        self.retrainInputFileTreeWidget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.retrainInputFileTreeWidget.itemSelectionChanged.connect(self.updateRetrainPreviewList)
+        self.retrainInputFileTreeWidget.itemClicked.connect(self.showRetrainImageOnItemClick)
 
         retrainInputFileSectionWidget = QWidget()
         retrainInputFileSectionLayout = QVBoxLayout(retrainInputFileSectionWidget)
         retrainInputFileSectionLayout.addWidget(self.retrainInputFileLabel)
-        retrainInputFileSectionLayout.addWidget(self.retrainInputFileListWidget)
+        retrainInputFileSectionLayout.addWidget(self.retrainInputFileTreeWidget)
         retrainInputFileSectionLayout.addLayout(retrainInputFilePathButtonsLayout)
 
         # --- Image Preview Section ---
@@ -626,7 +642,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     def enableWidgets(self, enable):
         # prediction tab widgets
-        self.inputFileListWidget.setEnabled(enable)
+        self.inputFileTreeWidget.setEnabled(enable)
         self.inputDirButton.setEnabled(enable)
         self.microscopeComboBox.setEnabled(enable)
         self.selectAllButton.setEnabled(enable)
@@ -656,7 +672,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.markBadButton.setEnabled(enable and self.current_preview_filename is not None)
 
         # re-training tab widgets
-        self.retrainInputFileListWidget.setEnabled(enable)
+        self.retrainInputFileTreeWidget.setEnabled(enable)
         self.retrainInputDirButton.setEnabled(enable)
         self.retrainSelectAllButton.setEnabled(enable)
         self.retrainDeselectAllButton.setEnabled(enable)
@@ -711,7 +727,7 @@ class PyMarAiGuiApp(QMainWindow):
     # updates the input directory label to show only the last part of the path
     def updateInputDirectoryLabel(self, dir_path: str):
         display_path = self.shortenPathForLabel(dir_path)
-        self.inputFileLabel.setText(f"Input folder: {display_path}")
+        self.inputDirLabel.setText(display_path)
 
     def updateRetrainInputDirectoryLabel(self, dir_path: str):
         display_path = self.shortenPathForLabel(dir_path)
@@ -719,8 +735,8 @@ class PyMarAiGuiApp(QMainWindow):
 
     # updates the file count label to show how many files in directory (and how many of them are selected)
     def updateFileCountLabel(self):
-        total_files = self.inputFileListWidget.count()
-        selected_files = len(self.inputFileListWidget.selectedItems())
+        total_files = self.inputFileTreeWidget.topLevelItemCount()
+        selected_files = len(self.inputFileTreeWidget.selectedItems())
 
         if total_files > 0:
             self.fileCountLabel.setText(f"{selected_files}/{total_files} images")
@@ -728,8 +744,8 @@ class PyMarAiGuiApp(QMainWindow):
             self.fileCountLabel.setText("No images loaded")
 
     def updateRetrainFileCountLabel(self):
-        total_files = self.retrainInputFileListWidget.count() // 2  # count pairs
-        selected_files = len(self.retrainInputFileListWidget.selectedItems()) // 2
+        total_files = self.retrainInputFileTreeWidget.topLevelItemCount() // 2  # count pairs
+        selected_files = len(self.retrainInputFileTreeWidget.selectedItems()) // 2
 
         if total_files > 0:
             self.retrainFileCountLabel.setText(f"{selected_files}/{total_files} pairs")
@@ -739,7 +755,7 @@ class PyMarAiGuiApp(QMainWindow):
     # finds the corresponding analyzed output file and sets the microscopeComboBox
     # based on the microscope number in the filename
     def findAndSetMicroscopeFromAnalyzedFile(self, input_filename):
-        basename = os.path.splitext(input_filename)[0]
+        basename, ext = os.path.splitext(input_filename)
 
         pattern = re.compile(r"_m(\d+)")
         if os.path.isdir(self.hiddenOutputDir):
@@ -826,9 +842,9 @@ class PyMarAiGuiApp(QMainWindow):
     # marks files in the input list that have already been analyzed
     def markAnalyzedFiles(self):
         output_dir = self.hiddenOutputDir
-        items = [self.inputFileListWidget.item(i) for i in range(self.inputFileListWidget.count())]
+        items = [self.inputFileTreeWidget.topLevelItem(i) for i in range(self.inputFileTreeWidget.topLevelItemCount())]
 
-        self.inputFileListWidget.setUpdatesEnabled(False)
+        self.inputFileTreeWidget.setUpdatesEnabled(False)
         self.file_status.clear()
 
         self.statusWorker = FileStatusWorker(
@@ -838,14 +854,21 @@ class PyMarAiGuiApp(QMainWindow):
 
         def finish(batch):
             if batch:
-              for item, text, color, status_found in batch:
-                  full_path = item.data(Qt.UserRole)
+              for item, text, color, status_found, changes in batch:
+                  full_path = item.data(0, Qt.UserRole)
                   self.file_status[full_path] = status_found
-                  item.setText(text)
-                  item.setForeground(QBrush(color))
+                  item.setText(0, text)
+                  item.setText(1, status_found)
+                  if changes > 0:
+                      item.setText(2, f"{changes}")
+                  else:
+                      item.setText(2, "")
+                  item.setForeground(0, QBrush(color))
+                  item.setForeground(1, QBrush(color))
+                  item.setForeground(2, QBrush(color))
 
-            self.inputFileListWidget.setUpdatesEnabled(True)
-            if self.inputFileListWidget.selectedItems():
+            self.inputFileTreeWidget.setUpdatesEnabled(True)
+            if self.inputFileTreeWidget.selectedItems():
                 self.updatePreviewList()
 
             self.setProgressBarText()
@@ -854,10 +877,6 @@ class PyMarAiGuiApp(QMainWindow):
         self.setProgressBarText("Checking delineation status...")
         self.statusWorker.start()
 
-    # removes the suffix from a filename string
-    def cleanFilename(self, text):
-        return text.split(" [")[0].strip()
-
     # update the text of the zoom_percent_label with the new percentage
     def setZoomPercentageLabel(self, zoom_factor):
         percentage = int(zoom_factor * 100.0)
@@ -865,7 +884,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # opens a dialog to select the input directory for predictions
     def loadInputDirectory(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Prediction Input Folder")
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Prediction Input Folder", self.selectedInputDirectory, QFileDialog.ShowDirsOnly)
         if dir_path:
             self.settings.setValue("lastInputDir", dir_path)
             self.updateInputDirectoryLabel(dir_path)
@@ -885,7 +904,7 @@ class PyMarAiGuiApp(QMainWindow):
     def loadFilesFromDirectory(self, dir_path):
         self.update_progress_text_signal.emit(
             f"Scanning directory for tif or png images: {dir_path}.\n")
-        self.inputFileListWidget.clear()
+        self.inputFileTreeWidget.clear()
         self.setProgressBarText("Loading images...")
         self.previewList = []
 
@@ -904,7 +923,7 @@ class PyMarAiGuiApp(QMainWindow):
     # loads .v and .rdf files from a specified directory for re-training
     def loadRetrainFilesFromDirectory(self, dir_path):
         self.update_retrain_progress_text_signal.emit(f"Scanning directory for v or rdf files: {dir_path}.\n")
-        self.retrainInputFileListWidget.clear()
+        self.retrainInputFileTreeWidget.clear()
         self.retrainPreviewList = []
 
         self.processingRetrainRunning = True
@@ -920,15 +939,15 @@ class PyMarAiGuiApp(QMainWindow):
     # callback when prediction files are loaded by the worker
     def onPredictionFilesLoaded(self, file_list, dir_path):
         self.selectedInputDirectory = dir_path
-        self.inputFileListWidget.clear()
-        self.inputFileListWidget.clearSelection()
+        self.inputFileTreeWidget.clear()
+        self.inputFileTreeWidget.clearSelection()
 
         for file in file_list:
             full_path = os.path.join(dir_path, file)
             display_name = os.path.basename(file)
-            item = QListWidgetItem(display_name)
-            item.setData(Qt.UserRole, full_path)
-            self.inputFileListWidget.addItem(item)
+            item = QTreeWidgetItem([display_name])
+            item.setData(0, Qt.UserRole, full_path)
+            self.inputFileTreeWidget.addTopLevelItem(item)
 
         if file_list:
             self.previewList = []
@@ -949,12 +968,12 @@ class PyMarAiGuiApp(QMainWindow):
     # callback when re-training files are loaded by the worker
     def onRetrainFilesLoaded(self, file_list, dir_path):
         self.selectedRetrainInputDirectory = dir_path
-        self.retrainInputFileListWidget.clear()
-        self.retrainInputFileListWidget.clearSelection()
+        self.retrainInputFileTreeWidget.clear()
+        self.retrainInputFileTreeWidget.clearSelection()
 
         for file in file_list:
-            item = QListWidgetItem(file)
-            self.retrainInputFileListWidget.addItem(item)
+            item = QTreeWidgetItem(file)
+            self.retrainInputFileTreeWidget.addTopLevelItem(item)
 
         if file_list:
             self.retrainPreviewList = []
@@ -993,7 +1012,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # updates the prediction preview list based on selected items
     def updatePreviewList(self):
-        items = self.inputFileListWidget.selectedItems()
+        items = self.inputFileTreeWidget.selectedItems()
         self.updateFileCountLabel()
         self.originalPredictionImage = None
         self.imagePreviewLabel.clear()
@@ -1002,7 +1021,7 @@ class PyMarAiGuiApp(QMainWindow):
 
         if items:
             # get the full paths of all selected items
-            self.previewList = [item.data(Qt.UserRole) for item in items]
+            self.previewList = [item.data(0, Qt.UserRole) for item in items]
             self.previewIndex = 0
 
             # get the full path and filename of the first selected item for preview
@@ -1030,7 +1049,7 @@ class PyMarAiGuiApp(QMainWindow):
 
     # updates the re-training preview list based on selected items
     def updateRetrainPreviewList(self):
-        items = self.retrainInputFileListWidget.selectedItems()
+        items = self.retrainInputFileTreeWidget.selectedItems()
         self.updateRetrainFileCountLabel()
         self.originalRetrainImage = None
         self.retrainImagePreviewLabel.clear()
@@ -1038,7 +1057,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.retrainImageFilenameLabel.setText("No file selected")
 
         if items:
-            self.retrainPreviewList = [self.cleanFilename(item.text()) for item in items]
+            self.retrainPreviewList = [item.text(0) for item in items]
             self.retrainPreviewIndex = 0
             self.showRetrainImageAtIndex(self.retrainPreviewIndex)
         else:
@@ -1048,14 +1067,14 @@ class PyMarAiGuiApp(QMainWindow):
 
     # displays the selected image in the prediction preview
     def showImageOnItemClick(self, item):
-        filename = self.cleanFilename(item.text())
+        filename = item.text(0)
         self.previewList = [filename]
         self.previewIndex = 0
         self.showImageAtIndex(self.previewIndex)
 
     # displays the selected image in the re-training preview
     def showRetrainImageOnItemClick(self, item):
-        filename = self.cleanFilename(item.text())
+        filename = item.text(0)
         self.retrainPreviewList = [filename]
         self.retrainPreviewIndex = 0
         self.showRetrainImageAtIndex(self.retrainPreviewIndex)
@@ -1512,12 +1531,12 @@ class PyMarAiGuiApp(QMainWindow):
             self.showImageAtIndex(self.previewIndex)
         else:
             # navigate through entire list if only one file was selected
-            count = self.inputFileListWidget.count()
+            count = self.inputFileTreeWidget.topLevelItemCount()
             if count == 0:
                 return
-            current_row = self.inputFileListWidget.currentRow()
+            current_row = self.inputFileTreeWidget.currentRow()
             next_row = (current_row + 1) % count
-            self.inputFileListWidget.setCurrentRow(next_row)
+            self.inputFileTreeWidget.setCurrentRow(next_row)
             self.updatePreviewList()
 
     def showPreviousImage(self):
@@ -1527,12 +1546,12 @@ class PyMarAiGuiApp(QMainWindow):
             self.showImageAtIndex(self.previewIndex)
         else:
             # navigate through entire list if only one file was selected
-            count = self.inputFileListWidget.count()
+            count = self.inputFileTreeWidget.topLevelItemCount()
             if count == 0:
                 return
-            current_row = self.inputFileListWidget.currentRow()
+            current_row = self.inputFileTreeWidget.currentRow()
             prev_row = (current_row - 1 + count) % count
-            self.inputFileListWidget.setCurrentRow(prev_row)
+            self.inputFileTreeWidget.setCurrentRow(prev_row)
             self.updatePreviewList()
 
     def updatePreviewImage(self):
@@ -1562,22 +1581,22 @@ class PyMarAiGuiApp(QMainWindow):
             self.showRetrainImageAtIndex(self.retrainPreviewIndex)
 
     def selectAllFiles(self):
-        self.inputFileListWidget.selectAll()
+        self.inputFileTreeWidget.selectAll()
         self.updatePreviewList()
 
     def deselectAllFiles(self):
-        self.inputFileListWidget.clearSelection()
+        self.inputFileTreeWidget.clearSelection()
         self.updatePreviewList()
 
     def openAllSelectedFilesInRover(self):
-        selected_items = self.inputFileListWidget.selectedItems()
+        selected_items = self.inputFileTreeWidget.selectedItems()
         if not selected_items:
             self.update_progress_text_signal.emit("[ERROR] No images selected to open in ROVER.\n")
             return
 
         analyzed_filenames = []
         for item in selected_items:
-            full_path = item.data(Qt.UserRole)
+            full_path = item.data(0, Qt.UserRole)
             # check if the file has an analyzed status in the file_status dictionary
             status = self.file_status.get(full_path)
             if status in ("TO DO", "GOOD", "BAD"):
@@ -1593,12 +1612,12 @@ class PyMarAiGuiApp(QMainWindow):
 
     # selects all files in the re-training input list
     def selectAllRetrainFiles(self):
-        self.retrainInputFileListWidget.selectAll()
+        self.retrainInputFileTreeWidget.selectAll()
         self.updateRetrainPreviewList()
 
     # deselects all files in the re-training input list
     def deselectAllRetrainFiles(self):
-        self.retrainInputFileListWidget.clearSelection()
+        self.retrainInputFileTreeWidget.clearSelection()
         self.updateRetrainPreviewList()
 
     # --- Progress Bar Handling ---
@@ -1761,7 +1780,7 @@ class PyMarAiGuiApp(QMainWindow):
             )
 
     def saveSelectedOutputs(self):
-        selected_items = self.inputFileListWidget.selectedItems()
+        selected_items = self.inputFileTreeWidget.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No images selected", "Please select one or more images to save.")
             return
@@ -1771,7 +1790,7 @@ class PyMarAiGuiApp(QMainWindow):
         analyzed_files_info = []
 
         for item in selected_items:
-            full_path = item.data(Qt.UserRole)
+            full_path = item.data(0, Qt.UserRole)
             if full_path in self.file_status:
                 base_filename = os.path.splitext(os.path.basename(full_path))[0]
                 analyzed_files_info.append({
@@ -1845,14 +1864,14 @@ class PyMarAiGuiApp(QMainWindow):
 
     # generates a statistics table using the 'thrass' command for all selected files that have a 'GOOD' status
     def generateStatisticsTable(self):
-        selected_items = self.inputFileListWidget.selectedItems()
+        selected_items = self.inputFileTreeWidget.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No images selected", "Please select one or more images to generate statistics for.")
             return
 
         good_files = []
         for item in selected_items:
-            full_path = item.data(Qt.UserRole)
+            full_path = item.data(0, Qt.UserRole)
             if self.file_status.get(full_path) == "GOOD":
                 good_files.append(full_path)
 
@@ -2102,62 +2121,64 @@ class PyMarAiGuiApp(QMainWindow):
         if forced_status:
             status = forced_status
 
-        for i in range(self.inputFileListWidget.count()):
-            item = self.inputFileListWidget.item(i)
+        for i in range(self.inputFileTreeWidget.topLevelItemCount()):
+            item = self.inputFileTreeWidget.topLevelItem(i)
 
             # match the item using the full path stored in its data
-            if item.data(Qt.UserRole) == full_path:
+            if item.data(0, Qt.UserRole) == full_path:
+                color = Qt.black
                 if status:
-                    item.setText(re.sub(r" \[(GOOD|BAD|TO DO)\]", f" [{status}]", item.text()))
+                    item.setText(1, status)
                     if status == "GOOD":
-                        item.setForeground(QBrush(QColor("green")))
+                        color = QBrush(QColor("green"))
                     elif status == "BAD":
-                        item.setForeground(QBrush(QColor("red")))
+                        color = QBrush(QColor("red"))
                     elif status == "TO DO":
-                        item.setForeground(QBrush(QColor("orange")))
-                    else:
-                        item.setForeground(QBrush(QColor("black")))
+                        color = QBrush(QColor("orange"))
                 else:
-                    # if no status, show the original filename with extension
-                    item.setText(original_filename)
-                    item.setForeground(Qt.black)
+                    # if no status, set empty status
+                    item.setText(1, "")
+
+                item.setForeground(0, color)
+                item.setForeground(1, color)
+                item.setForeground(2, color)
 
                 # found it, break out
                 break
 
     # select all files marked as GOOD in the list
     def selectAllGoodFiles(self):
-        self.inputFileListWidget.itemSelectionChanged.disconnect()
-        self.inputFileListWidget.clearSelection()
-        for i in range(self.inputFileListWidget.count()):
-            item = self.inputFileListWidget.item(i)
-            if "[GOOD]" in item.text():
+        self.inputFileTreeWidget.itemSelectionChanged.disconnect()
+        self.inputFileTreeWidget.clearSelection()
+        for i in range(self.inputFileTreeWidget.topLevelItemCount()):
+            item = self.inputFileTreeWidget.topLevelItem(i)
+            if "GOOD" in item.text(1):
                 item.setSelected(True)
 
-        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileTreeWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.updatePreviewList()
 
     # select all files marked as BAD in the list
     def selectAllBadFiles(self):
-        self.inputFileListWidget.itemSelectionChanged.disconnect()
-        self.inputFileListWidget.clearSelection()
-        for i in range(self.inputFileListWidget.count()):
-            item = self.inputFileListWidget.item(i)
-            if "[BAD]" in item.text():
+        self.inputFileTreeWidget.itemSelectionChanged.disconnect()
+        self.inputFileTreeWidget.clearSelection()
+        for i in range(self.inputFileTreeWidget.topLevelItemCount()):
+            item = self.inputFileTreeWidget.topLevelItem(i)
+            if "BAD" in item.text(1):
                 item.setSelected(True)
-        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileTreeWidget.itemSelectionChanged.connect(self.updatePreviewList)
         self.updatePreviewList()
 
     # selects all files that have not yet been analysed (have no status)
     def selectAllUntaggedFiles(self):
-        self.inputFileListWidget.itemSelectionChanged.disconnect()
-        self.inputFileListWidget.clearSelection()
+        self.inputFileTreeWidget.itemSelectionChanged.disconnect()
+        self.inputFileTreeWidget.clearSelection()
         untagged_items = []
 
         # Iterate through the list widget items once to find items with no status
-        for row in range(self.inputFileListWidget.count()):
-            item = self.inputFileListWidget.item(row)
-            file_path = item.data(Qt.UserRole)
+        for row in range(self.inputFileTreeWidget.topLevelItemCount()):
+            item = self.inputFileTreeWidget.topLevelItem(row)
+            file_path = item.data(0, Qt.UserRole)
 
             if file_path not in self.file_status:
                 untagged_items.append(item)
@@ -2165,7 +2186,7 @@ class PyMarAiGuiApp(QMainWindow):
         # Set the selection for all identified unanalysed items
         for item in untagged_items:
             item.setSelected(True)
-        self.inputFileListWidget.itemSelectionChanged.connect(self.updatePreviewList)
+        self.inputFileTreeWidget.itemSelectionChanged.connect(self.updatePreviewList)
 
     ####################################################
     # handle the event of Run Prediction button pressing
@@ -2173,12 +2194,12 @@ class PyMarAiGuiApp(QMainWindow):
     def predictionButtonPressed(self):
         if not self.processingRunning:
             # check for already-analyzed files first
-            selected_items = self.inputFileListWidget.selectedItems()
+            selected_items = self.inputFileTreeWidget.selectedItems()
             if not selected_items:
                 self.update_progress_text_signal.emit("No images selected.\n")
                 return
 
-            selected_filenames = [self.cleanFilename(item.text()) for item in selected_items]
+            selected_filenames = [item.text(0) for item in selected_items]
             output_dir = self.hiddenOutputDir
 
             already_analyzed = []
@@ -2983,7 +3004,7 @@ class FileLoaderWorker(QThread):
 
 
 class FileStatusWorker(QThread):
-    finished_all = pyqtSignal(list) # list of (item, text, color, status)
+    finished_all = pyqtSignal(list) # list of (item, text, color, status, changes)
 
     def __init__(self, input_items, output_dir, parent=None):
         super().__init__(parent)
@@ -3000,7 +3021,7 @@ class FileStatusWorker(QThread):
             output_files = []
 
         for row, item in enumerate(self.input_items):
-            full_path = item.data(Qt.UserRole)
+            full_path = item.data(0, Qt.UserRole)
             base_name, _ = os.path.splitext(os.path.basename(full_path))
 
             # detect status as before
@@ -3023,11 +3044,6 @@ class FileStatusWorker(QThread):
                     # count rdf files that start with basename
                     rdf_count += 1
 
-            if status_found:
-                text += f"  [{status_found}]"
-            if rdf_count > 1:
-                text += f" ({rdf_count - 1})"
-
             if status_found == "GOOD":
                 color = QColor("green")
             elif status_found == "BAD":
@@ -3037,7 +3053,7 @@ class FileStatusWorker(QThread):
             else:
                 color = QColor("black")
 
-            batch.append((item, text, color, status_found))
+            batch.append((item, text, color, status_found, rdf_count-1))
 
         self.finished_all.emit(batch)
 
