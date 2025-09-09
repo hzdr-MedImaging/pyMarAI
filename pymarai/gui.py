@@ -689,7 +689,7 @@ class PyMarAiGuiApp(QMainWindow):
     # helper to create a QPushButton
     def createButton(self, text, member):
         button = QPushButton(text)
-        button.setFixedHeight(25)
+        button.setFixedHeight(30)
         button.clicked.connect(member)
         return button
 
