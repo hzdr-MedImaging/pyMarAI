@@ -169,7 +169,7 @@ class MarAiRemoteRetrain(MarAiRemote):
 
         # nnUNet plan & preprocess
         pp_cmd = (
-            f"{shlex.quote(self.conda_bin)} run -n {shlex.quote(self.nnunet_env)} --live-stream "
+            f"{shlex.quote(self.conda_bin)} run -p {shlex.quote(self.nnunet_env)} --live-stream "
             f"nnUNetv2_plan_and_preprocess -d {ds} --verify_dataset_integrity -c {shlex.quote(self.config)} -np 8"
         )
         self._exec_remote(pp_cmd, stream_output=True)
@@ -245,7 +245,7 @@ class MarAiRemoteRetrain(MarAiRemote):
                 progress_callback(fold, len(folds), f"fold={fold}, gpu={gpu}", "training_start")
             cmd = (
                 f"CUDA_VISIBLE_DEVICES={gpu} "
-                f"{shlex.quote(self.conda_bin)} run -n {shlex.quote(self.nnunet_env)} --live-stream "
+                f"{shlex.quote(self.conda_bin)} run -p {shlex.quote(self.nnunet_env)} --live-stream "
                 f"{shlex.quote(self.nnunet_train_bin)} -tr {shlex.quote(self.nnunet_trainer)} {ds} {shlex.quote(self.config)} {fold}"
             )
             self._exec_remote(cmd, stream_output=True)

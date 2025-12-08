@@ -23,7 +23,7 @@ scripts:
   custom_split_script: "/pet/projekte/ai/delineation/spheroids/summerStudent/ecat/retrain/custom_split.py"
 
 nnunet:
-  env: "nnunet-spheroids"
+  env: "/usr/local/miniforge3/envs/nnunet-spheroids"
   dataset: "Dataset001_spheroids_V1"
   trainer: "nnUNetTrainer_noSmooth"
   config: "2d"

@@ -114,7 +114,7 @@ class MarAiBase(ABC):
         folds_str = ' '.join(map(str, folds))
 
         return (
-            f"{self.conda_path} run -n {env} --live-stream {self.nnunet_predict_path} "
+            f"{self.conda_path} run -p {env} --live-stream {self.nnunet_predict_path} "
             f"-d {dataset} -i {input_dir} -o {output_dir} "
             f"-f {folds_str} -tr {trainer} -c {config} -p {plans}"
         )
