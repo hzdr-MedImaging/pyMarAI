@@ -1,87 +1,24 @@
-from setuptools import setup, find_packages
-import os
-import platform
+#
+# pyMarAI - Tumor Spheroids Auto Delineation Tool
+#           https://github.com/hzdr-MedImaging/pyMarAI
+#
+# Copyright (C) 2025 hzdr.de and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-# get version from __init__
-import sys
-sys.path.insert(0, ("./pymarai"))
-from __init__ import __version__
-
-setup(
-    name='pymarai',
-
-    # Versions should comply with PEP440.  For a discussion on single-sourcing
-    # the version across setup.py and the project code, see
-    # https://packaging.python.org/en/latest/single_source_version.html
-    version=__version__,
-
-    description='Spheroids Auto Delineation',
-    #long_description=long_description,
-
-    # The project's main homepage.
-    url='https://hzdr.de/',
-
-    # Author details
-    author='Varvara Melnyk',
-    author_email='v.melnyk@hzdr.de',
-
-    # Choose your license
-    license='MIT',
-
-    # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
-    classifiers=[
-        # How mature is this project? Common values are
-        #   3 - Alpha
-        #   4 - Beta
-        #   5 - Production/Stable
-        'Development Status :: 4 - Beta',
-
-        # Indicate who your project is intended for
-        'Intended Audience :: Developers',
-        'Topic :: Software Development :: Build Tools',
-
-        # Pick your license as you wish (should match "license" above)
-        'License :: OSI Approved :: MIT License',
-
-        # Specify the Python versions you support here. In particular, ensure
-        # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 3',
-    ],
-
-    # What does your project relate to?
-    keywords='biology microscopy delineation spheroids ai',
-
-    # You can just specify the packages manually here if your project is
-    # simple. Or you can use find_packages().
-    packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
-
-    # List run-time dependencies here.  These will be installed by pip when
-    # your project is installed. For an analysis of "install_requires" vs pip's
-    # requirements files see:
-    # https://packaging.python.org/en/latest/requirements.html
-    #install_requires=['PyQt5', 'paramiko', 'pmedio', 'PyYAML', 'numpy', 'matplotlib', 'opencv-python-headless'],
-    install_requires=['PyQt5', 'paramiko', 'pmedio', 'PyYAML', 'matplotlib'],
-
-    # List additional groups of dependencies here (e.g. development
-    # dependencies). You can install these using the following syntax,
-    # for example:
-    # $ pip install -e .[dev,test]
-    extras_require={
-        'dev': ['check-manifest'],
-        'test': ['coverage'],
-    },
-
-    # To provide executable scripts, use entry points in preference to the
-    # "scripts" keyword. Entry points provide cross-platform support and allow
-    # pip to create the appropriate form of executable for the target platform.
-    entry_points={
-        'console_scripts': [
-            'pymarai=pymarai.gui:main',
-            'pymarai-predict=pymarai.predict:main',
-            'pymarai-retrain=pymarai.retrain:main',
-        ],
-    },
-)
+from setuptools import setup
+setup()
 
 # this is hackish but there doesn't seem to be a nice solution for this :(
 #if platform.system() != 'Windows':

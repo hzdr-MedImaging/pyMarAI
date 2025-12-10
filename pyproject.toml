@@ -1,3 +1,76 @@
+#
+# pyMarAI - Tumor Spheroids Auto Delineation Tool
+#           https://github.com/hzdr-MedImaging/pyMarAI
+#
+# Copyright (C) 2025 hzdr.de and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+[project]
+name = "pyMarAI"
+version = "0.8.2"
+description = "Tumor Spheroids Auto Delineation Tool"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [
+    { name = "Jens Maus", email = "j.maus@hzdr.de" },
+    { name = "Varvara Melnyk", email = "v.melnyk@hzdr.de" },
+]
+keywords = [
+    "deep learning",
+    "ai",
+    "spheroids",
+    "delineation",
+    "nnunet",
+    "pymarai",
+    "segmentation",
+    "cancer",
+    "research",
+    "biology",
+    "microscopy",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Segmentation",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+dependencies = [
+    'PyQt5',
+    'paramiko',
+    'pmedio>=0.2.1',
+    'PyYAML',
+    'matplotlib',
+    'opencv-python'
+]
+
+[project.urls]
+Homepage = "https://github.com/hzdr-MedImaging/PyMarAI"
+Documentation = "https://github.com/hzdr-MedImaging/PyMarAI/blob/main/README.md"
+Source = "https://github.com/hzdr-MedImaging/PyMarAI"
+
+[project.scripts]
+pymarai = 'pymarai.gui:main'
+pymarai-predict = 'pymarai.predict:main'
+pymarai-retrain = 'pymarai.retrain:main'
+
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=67.8.0"]
 build-backend = "setuptools.build_meta"

@@ -1,4 +1,4 @@
 __pycache__
 /build
-/pymarai.egg-info
+/*.egg-info
 /.venv
