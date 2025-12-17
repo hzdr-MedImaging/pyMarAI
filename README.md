@@ -1,4 +1,4 @@
-# pyMarAI: Tumor Spheroids Auto Delineation Tool
+# pyMarAI: Tumor Spheroids Auto Delineation
 
 **pyMarAI** is a toolchain including a PyQt5-based graphical user interface that allows to apply a CNN-based delineation workflow for bioimaging-driven tumor spheroid growth assays commonly used in cancer research.
 
