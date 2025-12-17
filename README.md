@@ -1,4 +1,4 @@
-# pyMarAI — Tumor Spheroids Auto Delineation Tool
+# pyMarAI: Tumor Spheroids Auto Delineation Tool
 
 **pyMarAI** is a toolchain including a PyQt5-based graphical user interface that allows to apply a CNN-based delineation workflow for bioimaging-driven tumor spheroid growth assays commonly used in cancer research.
 
@@ -21,7 +21,7 @@ The software provides a complete pipeline for handling microscopic spheroid imag
 - **Quality review and curation**  
   - Visual review of delineated images  
   - Tagging of delineation quality
-  - Optional manual correction hand-off (e.g. to [**ROVER**](http://abx-rover.de/rover/))
+  - Optional manual correction hand-off to external applications
 
 - **Continuous dataset growth for retraining**  
   - All new and manually corrected delineations are collected in a centralized directory structure  
@@ -34,7 +34,6 @@ pyMarAI allows to process the following data formats:
 ## Requirements
 - **Python 3.10+**
 - **nnUNet v2**
-- Optional: **ROVER** PET Image Analysis software package
 
 ## Build & install
 ```bash
@@ -54,12 +53,39 @@ If you use pyMarAI (or parts of it) in your own projects, evaluations or publica
 }
 ```
 
-## License
-pyMarAI is licensed under the **Apache License, Version 2.0.**
-See `LICENSE` for the full text.
+## Disclaimer (Research Use Only – Not a Medical Device)
+
+This software and any bundled or referenced model weights are provided **exclusively for research and development
+purposes**. They are **not intended** for use in the diagnosis, cure, mitigation, treatment, or prevention of disease,
+or for any other clinical decision-making.
+
+- The software is **not** a medical device and is **not** CE-marked.
+- No clinical performance, safety, or effectiveness is claimed or implied.
+- Any results must not be used to guide patient management.
+- Users are responsible for compliance with all applicable laws, regulations, and data protection requirements when
+  processing data.
+
+THE SOFTWARE AND MODELS ARE PROVIDED “AS IS”, WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED.
+
+## Licenses
+
+The **code** in this repository is licensed under **Apache-2.0** (see [`LICENSE`](LICENSE)).  
+The **model weights** are licensed under **CC-BY-SA-4.0** (see [`MODEL_LICENSE.md`](MODEL_LICENSE.md)).
+
+## Third-Party Licenses
+
+This project uses or interoperates with the following third-party components:
+
+- **nnU-Net v2** – Copyright © respective authors.
+    - License: **Apache-2.0**
+- **PyTorch**, **NumPy**, **Nibabel**, etc.
+    - Licensed under their respective open-source licenses.
+
+Each third-party component is the property of its respective owners and is provided under its own license terms. Copies
+of these licenses are available from the upstream projects.
 
 ### Notes on Qt licensing
-pyMarAI is released under **Apache-2.0**. It uses **pyQt**, which is
+pyMarAI itself is released under **Apache-2.0**. It uses **pyQt**, which is
 available under **GPLv3**. If you distribute applications that use pyMarAI
 you are responsible for **GPL compliance** for pyQt (dynamic linking
 recommended, include license texts, do not prohibit relinking, and provide
