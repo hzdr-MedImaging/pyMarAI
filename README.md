@@ -13,6 +13,8 @@ The software provides a complete pipeline for handling microscopic spheroid imag
 
 ## Features
 
+<img width="500px" src="resources/pymarai.png" align="right">
+
 - **User-friendly GUI (PyQt5)**  
   - Intuitive interface for configuring and running CNN-based delineation workflows without having to work directly on the command line.
 
