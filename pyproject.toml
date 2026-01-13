@@ -51,14 +51,18 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Segmentation",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
-
 dependencies = [
     'PyQt5',
     'paramiko',
     'pmedio>=0.2.1',
     'PyYAML',
-    'matplotlib',
-    'opencv-python'
+    'numpy==1.26.4',
+    'matplotlib'
+]
+
+[project.optional-dependencies]
+opencv = [
+    "opencv-python>=4.6",
 ]
 
 [project.urls]
@@ -72,5 +76,10 @@ pymarai-predict = 'pymarai.predict:main'
 pymarai-retrain = 'pymarai.retrain:main'
 
 [build-system]
-requires = ["setuptools>=67.8.0"]
+requires = ["setuptools>=67.8.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pymarai"]
+exclude = ["resources"]
