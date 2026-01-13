@@ -28,7 +28,7 @@ try:
 except PackageNotFoundError:
   __version__ = "0.0.0+unknown"
 
-__copyright__ = 'Copyright (c) 2025 Varvara Melnyk, Jens Maus, www.hzdr.de'
+__copyright__ = 'Copyright (c) 2025-2026 Jens Maus, Varvara Melnyk, www.hzdr.de'
 
 def error(*objs):
   print("ERROR:", *objs, file=sys.stderr)
