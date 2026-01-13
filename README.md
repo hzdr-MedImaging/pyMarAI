@@ -6,6 +6,11 @@
 
 The software provides a complete pipeline for handling microscopic spheroid image data, generating deep-learning–based 2D delineations, and allows to curate results for continuous model improvement.
 
+> [!IMPORTANT]
+> **Regulatory status:** This software and the bundled model are intended **solely for research and development (R&D)**.
+> They are **not** intended for primary diagnosis, therapy, or any other clinical decision-making and must **not** be used
+> as a medical device.
+
 ## Features
 
 - **User-friendly GUI (PyQt5)**  
