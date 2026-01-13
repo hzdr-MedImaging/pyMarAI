@@ -4,7 +4,7 @@
 
 **pyMarAI** is a toolchain including a PyQt5-based graphical user interface that allows to apply a CNN-based delineation workflow for bioimaging-driven tumor spheroid growth assays commonly used in cancer research.
 
-The software provides a complete pipeline for handling microscopic spheroid image data, running deep-learning–based delineation, and curating results for continuous model improvement.
+The software provides a complete pipeline for handling microscopic spheroid image data, generating deep-learning–based 2D delineations, and allows to curate results for continuous model improvement.
 
 ## Features
 
@@ -14,15 +14,16 @@ The software provides a complete pipeline for handling microscopic spheroid imag
 - **Image data management**  
   - Import and organize spheroid image datasets  
   - Automatic conversion between supported image formats (PNG, TIFF)
-  - Management of large-scale spheroid experiments
+  - Management of large-scale spheroid experiments (>10000 of spheroid images)
 
-- **CNN-based delineation at scale**  
+- **CNN-based delineation at scale**
+  - Ships with a pre-trained network model trained on microscopic spheroid images
   - Run automated delineation on large spheroid datasets  
-  - Support for GPU-accelerated environments to speed up predictions
+  - Support for GPU-accelerated environments to speed up inference
 
 - **Quality review and curation**  
   - Visual review of delineated images  
-  - Tagging of delineation quality
+  - Tagging of delineation quality (GOOD, BAD)
   - Optional manual correction hand-off to external applications
 
 - **Continuous dataset growth for retraining**  
@@ -30,30 +31,43 @@ The software provides a complete pipeline for handling microscopic spheroid imag
   - Facilitates expansion of the training dataset for future retraining and further improvement of the CNN model
 
 ## Supported formats
-pyMarAI allows to process the following data formats:
+pyMarAI allows to process the following microscopic image data formats:
 - **PNG / TIFF** microscopic images
 
 ## Requirements
 - **Python 3.10+**
-- **nnUNet v2**
+- **[nnUNet v2](https://github.com/MIC-DKFZ/nnUNet)**
+- optional: dedicated conda environment
 
 ## Build & install
 ```bash
 pip install .
 ```
 
-## Model installation
+### Model installation
 [![DOI](https://zenodo.org/badge/doi/10.14278/rodare.4198.svg)](https://doi.org/10.14278/rodare.4198)
 [![License](https://img.shields.io/github/license/hzdr-MedImaging/pyMarAI.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/MODEL_LICENSE)
 
-TBD
+pyMarAI works with nnUNet v2+ trained network models and provides the possibility to define the
+nnUNet-based network model which will be used for interference in a dedicated configuration file.
+In addition, it ships with a pre-trained network model which has been trained on thousands of
+microscopic spheroid images (see 'Citation' for the corresponding publication).
+
+To install and use this pre-trained network model please refer to the following data publication where you can
+download the network model from:
+
+https://doi.org/10.14278/rodare.4198
 
 ## Citation
 If you use pyMarAI (or parts of it) in your own projects, evaluations or publications please cite our work using
 
+> [!NOTE]
+> The following manuscript on the methods and pre-trained network model is currently under review.
+
 ```bib
-@article{Maus2025,
+@article{Maus2026,
   title = {Automatic delineation of tumor spheroids in microscopic images using deep-learning}
+  [...]
 }
 ```
 
@@ -80,7 +94,7 @@ The **model weights** are licensed under **CC-BY-SA-4.0** (see [`MODEL_LICENSE.m
 
 This project uses or interoperates with the following third-party components:
 
-- **nnU-Net v2** – Copyright © respective authors.
+- **[nnUNet v2](https://github.com/MIC-DKFZ/nnUNet)** – Copyright © respective authors.
     - License: **Apache-2.0**
 - **PyTorch**, **NumPy**, **Nibabel**, etc.
     - Licensed under their respective open-source licenses.
