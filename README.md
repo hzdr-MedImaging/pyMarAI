@@ -1,6 +1,7 @@
 # pyMarAI: nnU-Net-based Tumor Spheroids Auto Delineation
 [![DOI: 10.14278/rodare.4198](https://zenodo.org/badge/DOI/10.14278/rodare.4198.svg)](https://doi.org/10.14278/rodare.4198)
-[![License](https://img.shields.io/github/license/hzdr-MedImaging/pyMarAI.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/LICENSE)
+[![Software License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/LICENSE)
+[![Model License](https://img.shields.io/badge/License-CC_BY--SA_4.0-lightgrey.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/MODEL_LICENSE.md)
 
 **pyMarAI** is a toolchain including a PyQt5-based graphical user interface that allows to apply a CNN-based delineation workflow for bioimaging-driven tumor spheroid growth assays commonly used in cancer research.
 
@@ -53,7 +54,7 @@ pip install .
 
 ### Model installation
 [![DOI: 10.14278/rodare.4198](https://zenodo.org/badge/DOI/10.14278/rodare.4198.svg)](https://doi.org/10.14278/rodare.4198)
-[![License](https://img.shields.io/github/license/hzdr-MedImaging/pyMarAI.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/MODEL_LICENSE)
+[![Model License](https://img.shields.io/badge/License-CC_BY--SA_4.0-lightgrey.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/MODEL_LICENSE.md)
 
 pyMarAI works with nnUNet v2+ trained network models and provides the possibility to define the
 nnUNet-based network model which will be used for interference in a dedicated configuration file.
