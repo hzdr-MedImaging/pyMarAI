@@ -1,4 +1,5 @@
 # pyMarAI: nnU-Net-based Tumor Spheroids Auto Delineation
+[![DOI: 10.1021/acsmeasuresciau.5c00172](https://zenodo.org/badge/DOI/10.1021/acsmeasuresciau.5c00172.svg)](https://doi.org/10.1021/acsmeasuresciau.5c00172)
 [![DOI: 10.14278/rodare.4198](https://zenodo.org/badge/DOI/10.14278/rodare.4198.svg)](https://doi.org/10.14278/rodare.4198)
 [![Software License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/LICENSE)
 [![Model License](https://img.shields.io/badge/License-CC_BY--SA_4.0-lightgrey.svg)](https://github.com/hzdr-MedImaging/pyMarAI/blob/master/MODEL_LICENSE.md)
@@ -66,18 +67,21 @@ download the network model from:
 
 https://doi.org/10.14278/rodare.4198
 
-## Citation
-If you use pyMarAI (or parts of it) in your own projects, evaluations or publications please cite our work using
+## Citation / Publication
+[![DOI: 10.1021/acsmeasuresciau.5c00172](https://zenodo.org/badge/DOI/10.1021/acsmeasuresciau.5c00172.svg)](https://doi.org/10.1021/acsmeasuresciau.5c001728)
+[![Publication License](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)]()
 
-> [!NOTE]
-> The following manuscript on the methods and pre-trained network model is currently under review.
+If you use pyMarAI (or parts of it) in your own projects, evaluations or publications please cite our [corresponding publication](https://doi.org/10.1021/acsmeasuresciau.5c00172) using:
 
 ```bib
 @article{Maus2026,
-  title = {Automatic delineation of tumor spheroids in microscopic images using deep-learning}
-  [...]
+  title = {Automatic Delineation of Tumor Spheroids in Microscopic Images Using Deep-Learning},
+  author = {Maus, Jens and Nitschke, Janina and Nikulin, Pavel and Hofheinz, Frank and Barth, Mareike and Lemm, Sandy and Richter, Lena and Pietzsch, Jens and Braune, Anja and Ullrich, Martin},
+  journal = {ACS Measurement Science Au},
+  doi = {10.1021/acsmeasuresciau.5c00172}
 }
 ```
+The **publication** is licensed under **CC-BY-4.0**.
 
 ## Disclaimer (Research Use Only – Not a Medical Device)
 
