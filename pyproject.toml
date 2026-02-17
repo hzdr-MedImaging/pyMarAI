@@ -19,7 +19,7 @@
 
 [project]
 name = "pyMarAI"
-version = "0.8.2"
+version = "0.8.3"
 description = "Tumor Spheroids Auto Delineation Tool"
 readme = "README.md"
 requires-python = ">=3.9"

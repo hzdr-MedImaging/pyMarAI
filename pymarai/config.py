@@ -120,15 +120,16 @@ class AppConfig(metaclass=Singleton):
 
         for entry in machines_list:
             for hostname, host_cfg in entry.items():
+                remote = False
                 try:
                     if hostname != platform.node():
                         if len(ssh_keys) > 0:
+                            logger.debug(f"Authentication try with {ssh_keys[0]} as {username}")
                             ssh.connect(hostname, port=22, username=username, key_filename=ssh_keys[0])
                         else:
+                            logger.debug(f"Authentication try with password request as {username}")
                             ssh.connect(hostname, port=22, username=username, password=password)
                         remote = True
-                    else:
-                        remote = False
 
                     # Check CPU load
                     cpu_threshold = float(host_cfg.get("cpu_threshold", 1.0))
@@ -201,8 +202,8 @@ class AppConfig(metaclass=Singleton):
                         ssh.close()
                     return hostname, None
 
-                except paramiko.AuthenticationException:
-                    logger.error(f"Authentication failed for {hostname}.")
+                except paramiko.AuthenticationException as e:
+                    logger.error(f"Authentication failed for {hostname}: {e}")
                 except paramiko.SSHException as e:
                     logger.error(f"SSH error on {hostname}: {e}")
                 except Exception as e:

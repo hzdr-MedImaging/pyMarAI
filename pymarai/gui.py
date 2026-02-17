@@ -26,6 +26,7 @@ import datetime
 import filecmp
 import sys
 import os
+import getpass
 import argparse
 import subprocess
 import multiprocessing
@@ -82,7 +83,7 @@ class PyMarAiGuiApp(QMainWindow):
         self.selectedInputDirectory = self.settings.value("lastInputDir", "")
         self.selectedRetrainInputDirectory = self.settings.value("lastRetrainInputDir", "")
 
-        self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, f".pymarai-{os.getlogin()}")
+        self.hiddenOutputDir = os.path.join(self.selectedInputDirectory, f".pymarai-{getpass.getuser()}")
 
         self.retrainPreviewList = []
         self.retrainPreviewIndex = 0
@@ -906,7 +907,7 @@ class PyMarAiGuiApp(QMainWindow):
             self.settings.setValue("lastInputDir", dir_path)
             self.updateInputDirectoryLabel(dir_path)
             self.loadFilesFromDirectory(dir_path)
-            self.hiddenOutputDir = os.path.join(dir_path, f".pymarai-{os.getlogin()}")
+            self.hiddenOutputDir = os.path.join(dir_path, f".pymarai-{getpass.getuser()}")
 
             # opens a dialog to select the input directory for re-training
     def loadRetrainInputDirectory(self):
@@ -2236,9 +2237,14 @@ class PyMarAiGuiApp(QMainWindow):
 
             ssh_keys = [f for f in ssh_key_paths if os.path.exists(f)]
 
-            username = os.getlogin()
+            username = getpass.getuser()
             password = ""
             login_successful = False
+
+            print("JO")
+            for k in ssh_keys:
+                print(k)
+            print("DONE")
 
             if ssh_keys:
                 self.update_progress_text_signal.emit("SSH key found for user. Proceeding without password prompt.\n")
@@ -3038,7 +3044,7 @@ class PyMarAiGuiApp(QMainWindow):
 
             ssh_keys = [f for f in ssh_key_paths if os.path.exists(f)]
 
-            username = os.getlogin()
+            username = getpass.getuser()
             password = ""
             login_successful = False
 
@@ -3375,7 +3381,7 @@ class PyMarAiGuiApp(QMainWindow):
             ]
             ssh_keys = [f for f in ssh_key_paths if os.path.exists(f)]
 
-            username = os.getlogin()
+            username = getpass.getuser()
             password = ""
             login_successful = False
 
