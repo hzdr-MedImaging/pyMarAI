@@ -1,0 +1,86 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: 'pyMarAI: nnU-Net-based Tumor Spheroids Auto Delineation'
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Jens
+    family-names: Maus
+    email: j.maus@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0002-7195-9927'
+  - given-names: Janina
+    family-names: Nitschke
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    email: j.nitschke@hzdr.de
+  - given-names: Pavel
+    family-names: Nikulin
+    email: p.nikulin@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0002-4568-4018'
+  - given-names: Frank
+    family-names: Hofheinz
+    email: f.hofheinz@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0001-8016-4643'
+  - given-names: Mareike
+    family-names: Barth
+    email: m.barth@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+  - given-names: Sandy
+    family-names: Lemm
+    email: s.lemm@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0001-6763-5957'
+  - given-names: Lena
+    family-names: Richter
+    email: l.richter@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+  - given-names: Jens
+    family-names: Pietzsch
+    email: j.pietzsch@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0002-1610-1493'
+  - given-names: Anja
+    family-names: Braune
+    email: a.braune@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0001-7707-9413'
+  - given-names: Martin
+    family-names: Ullrich
+    email: m.ullrich@hzdr.de
+    affiliation: Helmholtz-Zentrum Dresden-Rossendorf
+    orcid: 'https://orcid.org/0000-0001-6104-6676'
+identifiers:
+  - type: doi
+    value: 10.1021/acsmeasuresciau.5c00172
+    description: Journal publication
+  - type: doi
+    value: 10.14278/rodare.4198
+    description: Data publication
+repository-code: 'https://github.com/hzdr-MedImaging/pyMarAI'
+url: 'https://doi.org/10.14278/rodare.4198'
+abstract: >-
+  pyMarAI is a toolchain including a PyQt5-based graphical
+  user interface that allows to apply a CNN-based
+  delineation workflow for bioimaging-driven tumor spheroid
+  growth assays commonly used in cancer research.
+
+
+  The software provides a complete pipeline for handling
+  microscopic spheroid image data, generating
+  deep-learning–based 2D delineations, and allows to curate
+  results for continuous model improvement.
+keywords:
+  - Tumor Spheroid Imaging
+  - Radiopharmacological Treatment Response Assays
+  - Delineation
+  - Cancer
+  - Deep-Learning
+  - Artificial Intelligence
+  - Convolutional Neural Networks
+license: Apache-2.0
