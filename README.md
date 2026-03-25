@@ -78,6 +78,8 @@ If you use pyMarAI (or parts of it) in your own projects, evaluations or publica
   title = {Automatic Delineation of Tumor Spheroids in Microscopic Images Using Deep-Learning},
   author = {Maus, Jens and Nitschke, Janina and Nikulin, Pavel and Hofheinz, Frank and Barth, Mareike and Lemm, Sandy and Richter, Lena and Pietzsch, Jens and Braune, Anja and Ullrich, Martin},
   journal = {ACS Measurement Science Au},
+  publisher={ACS Publications},
+  year={2026},
   doi = {10.1021/acsmeasuresciau.5c00172}
 }
 ```
