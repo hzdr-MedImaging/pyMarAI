@@ -134,7 +134,7 @@ class MarAiBase(ABC):
 
         return (
             f"{self.conda_path} run -p {env} --live-stream {self.nnunet_predict_path} "
-            f"-d {dataset} -i {input_dir} -o {output_dir} "
+            f"-d {dataset} -i \"{input_dir}\" -o \"{output_dir}\" "
             f"-f {folds_str} -tr {trainer} -c {config} -p {plans}"
         )
 
@@ -184,7 +184,7 @@ class MarAiBase(ABC):
         logger.info("Running mic2ecat...")
         if self.progress_callback:
             self.progress_callback(0, 0, None, "Converting microscope images …")
-        mic2ecat_cmd = f"cd {tempDir} && find . -maxdepth 1 -name '*.tif' -or -name '*.png' | xargs {self.mic2ecat_path} -j {microscope_number} -v"
+        mic2ecat_cmd = f"cd \"{tempDir}\" && find . -maxdepth 1 -name '*.tif' -or -name '*.png' | sed 's/ /\\\\ /g' | xargs {self.mic2ecat_path} -j {microscope_number} -v"
         mic2ecat_progress_pattern = r"processing file ./(.+\.(?:tif|png))"
         self.runCommand(mic2ecat_cmd, stream_output=True,
                         progress_pattern=mic2ecat_progress_pattern,
@@ -219,7 +219,7 @@ class MarAiBase(ABC):
         # --- Run roi2rdf ---
         if self.progress_callback:
             self.progress_callback(0, 0, None, "Generating RDF corrections …")
-        roi2rdf_cmd = f"cd {nnunet_output_dir} && {self.roi2rdf_path} -v *.v"
+        roi2rdf_cmd = f"cd \"{nnunet_output_dir}\" && {self.roi2rdf_path} -v *.v"
         roi2rdf_progress_pattern = r"converting rois in file (.+?)\.v$"
         self.runCommand(roi2rdf_cmd, stream_output=True,
                         progress_pattern=roi2rdf_progress_pattern,

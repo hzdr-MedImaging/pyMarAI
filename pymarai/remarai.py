@@ -153,14 +153,14 @@ class MarAiRemoteRetrain(MarAiRemote):
             progress_callback(0, 0, "symlinking", "rdf_to_masks")
 
         # produce *_roi.v via thrass
-        self._exec_local(f"cd {shlex.quote(retrain_dir)} && bash {shlex.quote(self.preprocess_script)}")
+        self._exec_local(f"cd \"{shlex.quote(retrain_dir)}\" && bash {shlex.quote(self.preprocess_script)}")
 
         if progress_callback:
             progress_callback(0, 0, "thrass", "rdf_to_masks")
 
         # symlink results into training staging dir
         symlink_cmd = (
-            f"cd {shlex.quote(self.training_staging_dir)} && "
+            f"cd \"{shlex.quote(self.training_staging_dir)}\" && "
             f"ln -sf {shlex.quote(retrain_dir)}/*_img.v {shlex.quote(retrain_dir)}/*_roi.v ."
         )
         self._exec_local(symlink_cmd)
@@ -175,7 +175,7 @@ class MarAiRemoteRetrain(MarAiRemote):
         ds = int(dataset_id)
         desc = shlex.quote(description)
 
-        cmd = f"cd {shlex.quote(self.dataset_workdir)} && {shlex.quote(self.create_dataset_script)} {ds} {desc}"
+        cmd = f"cd \"{shlex.quote(self.dataset_workdir)}\" && {shlex.quote(self.create_dataset_script)} {ds} {desc}"
 
         self._exec_local(cmd, stream_output=True)
 
